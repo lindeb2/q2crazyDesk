@@ -948,6 +948,12 @@ def build_flutter_dmg(version, features):
         f'FLUTTER_XCODE_ARCHS={mac_arch} FLUTTER_XCODE_ONLY_ACTIVE_ARCH=YES flutter build macos --release')
     # PRODUCT_NAME is q2crazyDesk, so the bundle is not RustDesk.app.
     system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/*.app/Contents/MacOS/')
+    # The copy breaks the bundle signature. One ad-hoc identity lets the app
+    # load FlutterMacOS.framework on a Mac that did not build it.
+    system2(
+        'codesign --force --deep --sign - '
+        '--entitlements macos/Runner/Release.entitlements '
+        './build/macos/Build/Products/Release/*.app')
     '''
     system2(
         "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")

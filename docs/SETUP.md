@@ -36,10 +36,12 @@ Download the latest artifacts from https://github.com/lindeb2/q2crazyDesk/releas
 ### macOS
 
 1. Open `q2crazydesk-<version>-aarch64.dmg` and drag the app to `/Applications`.
-2. Clear quarantine:
+2. Clear quarantine and give the bundle one signature. Without the second command, macOS aborts on launch with `different Team IDs` for `FlutterMacOS.framework`:
 
    ```bash
-   xattr -d com.apple.quarantine /Applications/q2crazyDesk.app
+   xattr -cr /Applications/q2crazyDesk.app
+   codesign --force --deep --sign - /Applications/q2crazyDesk.app
+   open /Applications/q2crazyDesk.app
    ```
 
 3. Grant permissions under System Settings → Privacy & Security:

@@ -28,9 +28,10 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-9 | `src/lan.rs` | `q2_peers::refresh()` at the start of `discover` | Discovered list includes Tailscale peers. |
 | U-10 | `src/ui_interface.rs` | `online` field on lan peer maps | The peer card can show Tailscale online state. |
 | U-11 | `flutter/lib/models/peer_model.dart`, `flutter/lib/desktop/pages/connection_page.dart` | Honour a payload `online` flag; show `q2-net-error` in the status line | R-DEV-4 and R-NET-5. |
-| U-12 | `build.py` | `build_flutter_dmg` copies `service` into `*.app` | The macOS bundle name follows `PRODUCT_NAME` (`q2crazyDesk.app`). |
+| U-12 | `build.py` | `build_flutter_dmg` copies `service` into `*.app`, then ad-hoc `codesign --deep` | The bundle name follows `PRODUCT_NAME`. The copy breaks the signature; one identity is required or another Mac refuses `FlutterMacOS.framework`. |
 | U-13 | `src/ui_interface.rs` | `set_option` for `q2-paired` also writes `whitelist` | Pairing reaches the service process, not only the window. |
 | U-14 | `flutter/lib/common/widgets/peer_card.dart` | Pair / Unpair on a discovered Tailscale card | R-DEV-3. The user approves each side locally. |
+| U-15 | `flutter/macos/Runner/Release.entitlements` | Disable library validation; allow incoming network | Release was missing `network.server` (present on the debug profile) and rejected a Flutter framework signed with another Team ID. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 
