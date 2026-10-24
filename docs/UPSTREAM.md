@@ -28,6 +28,7 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-9 | `src/lan.rs` | `q2_peers::refresh()` at the start of `discover` | Discovered list includes Tailscale peers. |
 | U-10 | `src/ui_interface.rs` | `online` field on lan peer maps | The peer card can show Tailscale online state. |
 | U-11 | `flutter/lib/models/peer_model.dart`, `flutter/lib/desktop/pages/connection_page.dart` | Honour a payload `online` flag; show `q2-net-error` in the status line | R-DEV-4 and R-NET-5. |
+| U-12 | `build.py` | `build_flutter_dmg` copies `service` into `*.app` | The macOS bundle name follows `PRODUCT_NAME` (`q2crazyDesk.app`). |
 
 ## LittleBigMouse (ported into `q2/layout`)
 
