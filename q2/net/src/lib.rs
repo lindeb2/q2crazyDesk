@@ -1,6 +1,8 @@
 //! Tailscale peer list and the 100.64.0.0/10 filter (R-NET).
 
+use std::io;
 use std::net::Ipv4Addr;
+use std::process::Command;
 
 use serde::Deserialize;
 
@@ -77,6 +79,45 @@ fn to_peer(p: PeerJson) -> Peer {
 /// First Tailscale IPv4 of a peer, if any.
 pub fn connect_ip(peer: &Peer) -> Option<Ipv4Addr> {
     peer.ips.first().copied()
+}
+
+#[derive(Debug)]
+pub enum NetError {
+    TailscaleNotRunning,
+    Io(io::Error),
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for NetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetError::TailscaleNotRunning => write!(
+                f,
+                "Tailscale is not running. Install it from https://tailscale.com/download and sign in to your personal tailnet."
+            ),
+            NetError::Io(e) => write!(f, "tailscale: {e}"),
+            NetError::Json(e) => write!(f, "tailscale status --json: {e}"),
+        }
+    }
+}
+
+/// Read peers from `tailscale status --json` (R-NET-4, R-NET-5).
+pub fn read_status() -> Result<Vec<Peer>, NetError> {
+    let output = match Command::new("tailscale")
+        .args(["status", "--json"])
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(NetError::TailscaleNotRunning);
+        }
+        Err(e) => return Err(NetError::Io(e)),
+    };
+    if !output.status.success() {
+        return Err(NetError::TailscaleNotRunning);
+    }
+    let json = String::from_utf8_lossy(&output.stdout);
+    parse_status_json(&json).map_err(NetError::Json)
 }
 
 #[cfg(test)]

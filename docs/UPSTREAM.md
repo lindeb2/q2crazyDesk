@@ -20,6 +20,9 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-1 | `.github/workflows/{flutter-nightly,update-webpki-roots,fdroid,flutter-tag,flutter-ci,ci,playground}.yml` | Deleted | They would run RustDesk's release pipeline on this fork. Replaced by the new `.github/workflows/q2-ci.yml`. |
 | U-2 | `README.md` | Replaced with the q2crazyDesk README | Product description and quick start. RustDesk's README is at https://github.com/rustdesk/rustdesk/blob/1.5.0/README.md. |
 | U-3 | `.github/workflows/q2-ci.yml` | Added (new file; listed so updates are not mistaken for an upstream file) | Trimmed build of Windows x64, macOS arm64, Android arm64, plus `test-q2`. |
+| U-4 | `src/lib.rs` | `mod q2_init;` | Load the q2 startup hook. |
+| U-5 | `src/common.rs` | `q2_init::apply()` at the start of `global_init` | Set the product name and the default Tailscale IP whitelist. |
+| U-6 | `flutter/android/app/src/main/res/values/strings.xml`, `flutter/macos/Runner/Configs/AppInfo.xcconfig` | Display name `q2crazyDesk` | Visible product name. Bundle id unchanged so updates keep data. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 
