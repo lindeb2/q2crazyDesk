@@ -10,9 +10,10 @@ const NET_ERROR_KEY: &str = "q2-net-error";
 
 pub fn refresh() {
     match q2_net::read_status() {
-        Ok(peers) => {
-            LocalConfig::set_flutter_option(NET_ERROR_KEY.to_owned(), "".to_owned());
-            store_peers(&peers);
+        Ok(status) => {
+            let message = q2_net::status_message(&status).unwrap_or_default();
+            LocalConfig::set_flutter_option(NET_ERROR_KEY.to_owned(), message);
+            store_peers(&status.peers);
         }
         Err(err) => {
             LocalConfig::set_flutter_option(NET_ERROR_KEY.to_owned(), err.to_string());

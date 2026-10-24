@@ -5,7 +5,7 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::process::Command;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// CGNAT / Tailscale range 100.64.0.0/10 (R-NET-3).
 pub const TAILSCALE_PREFIX: Ipv4Addr = Ipv4Addr::new(100, 64, 0, 0);
@@ -22,12 +22,44 @@ pub struct Peer {
     pub this_machine: bool,
 }
 
+#[derive(Debug)]
+pub struct Status {
+    pub backend_state: String,
+    pub health: Vec<String>,
+    pub peers: Vec<Peer>,
+}
+
+/// Message to show when Tailscale is installed but not in a tailnet yet.
+pub fn status_message(status: &Status) -> Option<String> {
+    if status.backend_state.is_empty() || status.backend_state == "Running" {
+        return None;
+    }
+    status.health.first().cloned().or_else(|| {
+        Some(format!(
+            "Tailscale is not connected ({})",
+            status.backend_state
+        ))
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct StatusJson {
-    #[serde(default, rename = "Peer")]
+    #[serde(default, rename = "BackendState")]
+    backend_state: String,
+    #[serde(default, rename = "Health", deserialize_with = "null_default")]
+    health: Vec<String>,
+    #[serde(default, rename = "Peer", deserialize_with = "null_default")]
     peer: std::collections::HashMap<String, PeerJson>,
     #[serde(default, rename = "Self")]
     self_node: Option<PeerJson>,
+}
+
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,7 +68,7 @@ struct PeerJson {
     host_name: String,
     #[serde(default, rename = "DNSName")]
     dns_name: String,
-    #[serde(default, rename = "TailscaleIPs")]
+    #[serde(default, rename = "TailscaleIPs", deserialize_with = "null_default")]
     tailscale_ips: Vec<String>,
     #[serde(default, rename = "Online")]
     online: bool,
@@ -51,7 +83,7 @@ pub fn is_tailscale_ip(ip: Ipv4Addr) -> bool {
     (ip_u & mask) == (net & mask)
 }
 
-pub fn parse_status_json(json: &str) -> Result<Vec<Peer>, serde_json::Error> {
+pub fn parse_status_json(json: &str) -> Result<Status, serde_json::Error> {
     let status: StatusJson = serde_json::from_str(json)?;
     let mut peers = Vec::new();
     if let Some(me) = status.self_node {
@@ -60,7 +92,11 @@ pub fn parse_status_json(json: &str) -> Result<Vec<Peer>, serde_json::Error> {
     for (_, p) in status.peer {
         peers.push(to_peer(p, false));
     }
-    Ok(peers)
+    Ok(Status {
+        backend_state: status.backend_state,
+        health: status.health,
+        peers,
+    })
 }
 
 fn to_peer(p: PeerJson, this_machine: bool) -> Peer {
@@ -137,7 +173,7 @@ impl std::fmt::Display for NetError {
 }
 
 /// Read peers from `tailscale status --json` (R-NET-4, R-NET-5).
-pub fn read_status() -> Result<Vec<Peer>, NetError> {
+pub fn read_status() -> Result<Status, NetError> {
     let output = match Command::new(tailscale_bin())
         .args(["status", "--json"])
         .output()
@@ -188,7 +224,9 @@ mod tests {
                 }
             }
         }"#;
-        let peers = parse_status_json(json).unwrap();
+        let status = parse_status_json(json).unwrap();
+        assert!(status_message(&status).is_none());
+        let peers = status.peers;
         assert_eq!(peers.len(), 2);
         assert!(peers.iter().any(|p| p.this_machine && p.hostname == "win1"));
         let mac = peers.iter().find(|p| p.hostname == "mac").unwrap();
@@ -196,5 +234,29 @@ mod tests {
         assert_eq!(mac.ips, vec![Ipv4Addr::new(100, 64, 9, 9)]);
         assert_eq!(mac.dns_name, "mac.tailnet.ts.net");
         assert_eq!(connect_ip(mac), Some(Ipv4Addr::new(100, 64, 9, 9)));
+    }
+
+    #[test]
+    fn starting_status_allows_null_lists() {
+        let json = r#"{
+            "BackendState": "NoState",
+            "TailscaleIPs": null,
+            "Self": {
+                "HostName": "win1",
+                "DNSName": "",
+                "TailscaleIPs": null,
+                "Online": false,
+                "OS": "windows"
+            },
+            "Health": ["Tailscale is starting. Please wait."],
+            "Peer": null
+        }"#;
+        let status = parse_status_json(json).unwrap();
+        assert_eq!(status.peers.len(), 1);
+        assert!(status.peers[0].ips.is_empty());
+        assert_eq!(
+            status_message(&status).as_deref(),
+            Some("Tailscale is starting. Please wait.")
+        );
     }
 }
