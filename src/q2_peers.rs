@@ -1,14 +1,22 @@
 //! Put Tailscale peers into RustDesk's discovered-peer list (R-NET-4, R-DEV-4).
 
 use std::net::Ipv4Addr;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use hbb_common::config::{DiscoveryPeer, LanPeers, LocalConfig};
 
 use q2_net::{self, Peer};
 
 const NET_ERROR_KEY: &str = "q2-net-error";
+const REFRESH_GAP: Duration = Duration::from_secs(10);
+
+static LAST_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
 
 pub fn refresh() {
+    if !refresh_due() {
+        return;
+    }
     match q2_net::read_status() {
         Ok(status) => {
             let message = q2_net::status_message(&status).unwrap_or_default();
@@ -74,6 +82,15 @@ fn mark_tailscale_offline() {
     if changed {
         LanPeers::store(&peers);
     }
+}
+
+fn refresh_due() -> bool {
+    let mut last = LAST_REFRESH.lock().unwrap();
+    if last.is_some_and(|t| t.elapsed() < REFRESH_GAP) {
+        return false;
+    }
+    *last = Some(Instant::now());
+    true
 }
 
 fn is_tailscale_peer_id(id: &str) -> bool {

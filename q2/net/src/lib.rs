@@ -172,12 +172,21 @@ impl std::fmt::Display for NetError {
     }
 }
 
+fn tailscale_status() -> io::Result<std::process::Output> {
+    let mut cmd = Command::new(tailscale_bin());
+    cmd.args(["status", "--json"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW. A console child of this GUI app otherwise flashes a terminal.
+        cmd.creation_flags(0x08000000);
+    }
+    cmd.output()
+}
+
 /// Read peers from `tailscale status --json` (R-NET-4, R-NET-5).
 pub fn read_status() -> Result<Status, NetError> {
-    let output = match Command::new(tailscale_bin())
-        .args(["status", "--json"])
-        .output()
-    {
+    let output = match tailscale_status() {
         Ok(o) => o,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             return Err(NetError::TailscaleNotRunning);
