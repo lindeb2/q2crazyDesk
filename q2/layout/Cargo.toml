@@ -1,0 +1,10 @@
+[package]
+name = "q2-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Millimetre canvas, monitor model, edge links, and profiles (R-LAYOUT)"
+
+[dependencies]
+serde.workspace = true

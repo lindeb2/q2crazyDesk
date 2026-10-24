@@ -1,0 +1,11 @@
+[package]
+name = "q2-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Tailscale peer discovery and Tailscale-range filter (R-NET)"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "q2-keys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Key mapping profiles and Swedish layout translation (R-KEYS)"
+
+[dependencies]
+serde.workspace = true

@@ -1,0 +1,122 @@
+//! Tailscale peer list and the 100.64.0.0/10 filter (R-NET).
+
+use std::net::Ipv4Addr;
+
+use serde::Deserialize;
+
+/// CGNAT / Tailscale range 100.64.0.0/10 (R-NET-3).
+pub const TAILSCALE_PREFIX: Ipv4Addr = Ipv4Addr::new(100, 64, 0, 0);
+pub const TAILSCALE_PREFIX_BITS: u8 = 10;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Peer {
+    pub hostname: String,
+    pub dns_name: String,
+    pub ips: Vec<Ipv4Addr>,
+    pub online: bool,
+    pub os: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusJson {
+    #[serde(default, rename = "Peer")]
+    peer: std::collections::HashMap<String, PeerJson>,
+    #[serde(default, rename = "Self")]
+    self_node: Option<PeerJson>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PeerJson {
+    #[serde(default, rename = "HostName")]
+    host_name: String,
+    #[serde(default, rename = "DNSName")]
+    dns_name: String,
+    #[serde(default, rename = "TailscaleIPs")]
+    tailscale_ips: Vec<String>,
+    #[serde(default, rename = "Online")]
+    online: bool,
+    #[serde(default, rename = "OS")]
+    os: String,
+}
+
+pub fn is_tailscale_ip(ip: Ipv4Addr) -> bool {
+    let ip_u = u32::from(ip);
+    let net = u32::from(TAILSCALE_PREFIX);
+    let mask = !0u32 << (32 - TAILSCALE_PREFIX_BITS);
+    (ip_u & mask) == (net & mask)
+}
+
+pub fn parse_status_json(json: &str) -> Result<Vec<Peer>, serde_json::Error> {
+    let status: StatusJson = serde_json::from_str(json)?;
+    let mut peers = Vec::new();
+    if let Some(me) = status.self_node {
+        peers.push(to_peer(me));
+    }
+    for (_, p) in status.peer {
+        peers.push(to_peer(p));
+    }
+    Ok(peers)
+}
+
+fn to_peer(p: PeerJson) -> Peer {
+    let ips = p
+        .tailscale_ips
+        .iter()
+        .filter_map(|s| s.parse::<Ipv4Addr>().ok())
+        .filter(|ip| is_tailscale_ip(*ip))
+        .collect();
+    Peer {
+        hostname: p.host_name,
+        dns_name: p.dns_name.trim_end_matches('.').to_string(),
+        ips,
+        online: p.online,
+        os: p.os,
+    }
+}
+
+/// First Tailscale IPv4 of a peer, if any.
+pub fn connect_ip(peer: &Peer) -> Option<Ipv4Addr> {
+    peer.ips.first().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_filter() {
+        assert!(is_tailscale_ip(Ipv4Addr::new(100, 64, 0, 1)));
+        assert!(is_tailscale_ip(Ipv4Addr::new(100, 127, 255, 254)));
+        assert!(!is_tailscale_ip(Ipv4Addr::new(100, 128, 0, 1)));
+        assert!(!is_tailscale_ip(Ipv4Addr::new(192, 168, 1, 10)));
+        assert!(!is_tailscale_ip(Ipv4Addr::new(10, 0, 0, 2)));
+    }
+
+    #[test]
+    fn parse_peers_keeps_only_100() {
+        let json = r#"{
+            "Self": {
+                "HostName": "win1",
+                "DNSName": "win1.tailnet.ts.net.",
+                "TailscaleIPs": ["100.64.1.2", "fd7a:115c::1"],
+                "Online": true,
+                "OS": "windows"
+            },
+            "Peer": {
+                "n2": {
+                    "HostName": "mac",
+                    "DNSName": "mac.tailnet.ts.net.",
+                    "TailscaleIPs": ["100.64.9.9", "192.168.1.5"],
+                    "Online": true,
+                    "OS": "macos"
+                }
+            }
+        }"#;
+        let peers = parse_status_json(json).unwrap();
+        assert_eq!(peers.len(), 2);
+        let mac = peers.iter().find(|p| p.hostname == "mac").unwrap();
+        assert_eq!(mac.ips, vec![Ipv4Addr::new(100, 64, 9, 9)]);
+        assert_eq!(mac.dns_name, "mac.tailnet.ts.net");
+        assert_eq!(connect_ip(mac), Some(Ipv4Addr::new(100, 64, 9, 9)));
+    }
+}

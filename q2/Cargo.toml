@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "layout",
+    "router",
+    "keys",
+    "sync",
+    "net",
+    "wake",
+    "display",
+    "dnd",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

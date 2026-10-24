@@ -1,0 +1,11 @@
+[package]
+name = "q2-dnd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Cross-machine file drag-and-drop protocol (R-FILES-2)"
+
+[dependencies]
+q2-layout = { path = "../layout" }
+serde.workspace = true

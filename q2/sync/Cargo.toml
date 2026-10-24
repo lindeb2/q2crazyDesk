@@ -1,0 +1,12 @@
+[package]
+name = "q2-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Last-writer-wins sync of layout, profiles, and settings (R-LAYOUT-7)"
+
+[dependencies]
+q2-layout = { path = "../layout" }
+serde.workspace = true
+serde_json.workspace = true
