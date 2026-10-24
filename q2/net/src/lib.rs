@@ -2,6 +2,7 @@
 
 use std::io;
 use std::net::Ipv4Addr;
+use std::path::Path;
 use std::process::Command;
 
 use serde::Deserialize;
@@ -17,6 +18,8 @@ pub struct Peer {
     pub ips: Vec<Ipv4Addr>,
     pub online: bool,
     pub os: String,
+    /// The machine that ran `tailscale status`.
+    pub this_machine: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,15 +55,15 @@ pub fn parse_status_json(json: &str) -> Result<Vec<Peer>, serde_json::Error> {
     let status: StatusJson = serde_json::from_str(json)?;
     let mut peers = Vec::new();
     if let Some(me) = status.self_node {
-        peers.push(to_peer(me));
+        peers.push(to_peer(me, true));
     }
     for (_, p) in status.peer {
-        peers.push(to_peer(p));
+        peers.push(to_peer(p, false));
     }
     Ok(peers)
 }
 
-fn to_peer(p: PeerJson) -> Peer {
+fn to_peer(p: PeerJson, this_machine: bool) -> Peer {
     let ips = p
         .tailscale_ips
         .iter()
@@ -73,6 +76,38 @@ fn to_peer(p: PeerJson) -> Peer {
         ips,
         online: p.online,
         os: p.os,
+        this_machine,
+    }
+}
+
+fn tailscale_bin() -> String {
+    if let Some(p) = std::env::var_os("Q2_TAILSCALE") {
+        return p.to_string_lossy().into_owned();
+    }
+    for candidate in tailscale_candidates() {
+        if Path::new(candidate).exists() {
+            return (*candidate).to_owned();
+        }
+    }
+    "tailscale".to_owned()
+}
+
+fn tailscale_candidates() -> &'static [&'static str] {
+    #[cfg(windows)]
+    {
+        &[r"C:\Program Files\Tailscale\tailscale.exe"]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        &[
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/local/bin/tailscale",
+        ]
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        &["/usr/bin/tailscale"]
     }
 }
 
@@ -103,7 +138,7 @@ impl std::fmt::Display for NetError {
 
 /// Read peers from `tailscale status --json` (R-NET-4, R-NET-5).
 pub fn read_status() -> Result<Vec<Peer>, NetError> {
-    let output = match Command::new("tailscale")
+    let output = match Command::new(tailscale_bin())
         .args(["status", "--json"])
         .output()
     {
@@ -155,7 +190,9 @@ mod tests {
         }"#;
         let peers = parse_status_json(json).unwrap();
         assert_eq!(peers.len(), 2);
+        assert!(peers.iter().any(|p| p.this_machine && p.hostname == "win1"));
         let mac = peers.iter().find(|p| p.hostname == "mac").unwrap();
+        assert!(!mac.this_machine);
         assert_eq!(mac.ips, vec![Ipv4Addr::new(100, 64, 9, 9)]);
         assert_eq!(mac.dns_name, "mac.tailnet.ts.net");
         assert_eq!(connect_ip(mac), Some(Ipv4Addr::new(100, 64, 9, 9)));

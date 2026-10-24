@@ -35,6 +35,7 @@ class OnlineStatusWidget extends StatefulWidget {
 class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   final _svcStopped = Get.find<RxBool>(tag: 'stop-service');
   final _svcIsUsingPublicServer = true.obs;
+  final _q2NetError = ''.obs;
   Timer? _updateTimer;
 
   double get em => 14.0;
@@ -155,15 +156,20 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
 
   _buildConnStatusMsg() {
     widget.onSvcStatusChanged?.call();
+    final q2Error = _q2NetError.value;
     return Text(
-      _svcStopped.value
-          ? translate("Service is not running")
-          : stateGlobal.svcStatus.value == SvcStatus.connecting
-              ? translate("connecting_status")
-              : stateGlobal.svcStatus.value == SvcStatus.notReady
-                  ? translate("not_ready_status")
-                  : translate('Ready'),
-      style: TextStyle(fontSize: em),
+      q2Error.isNotEmpty
+          ? q2Error
+          : _svcStopped.value
+              ? translate("Service is not running")
+              : stateGlobal.svcStatus.value == SvcStatus.connecting
+                  ? translate("connecting_status")
+                  : stateGlobal.svcStatus.value == SvcStatus.notReady
+                      ? translate("not_ready_status")
+                      : translate('Ready'),
+      style: TextStyle(
+          fontSize: em,
+          color: q2Error.isNotEmpty ? kColorWarn : null),
     );
   }
 
@@ -181,6 +187,7 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
       stateGlobal.svcStatus.value = SvcStatus.notReady;
     }
     _svcIsUsingPublicServer.value = await bind.mainIsUsingPublicServer();
+    _q2NetError.value = bind.getLocalFlutterOption(k: 'q2-net-error');
     try {
       stateGlobal.videoConnCount.value = status['video_conn_count'] as int;
     } catch (_) {}

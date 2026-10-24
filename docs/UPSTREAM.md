@@ -23,6 +23,11 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-4 | `src/lib.rs` | `mod q2_init;` | Load the q2 startup hook. |
 | U-5 | `src/common.rs` | `q2_init::apply()` at the start of `global_init` | Set the product name and the default Tailscale IP whitelist. |
 | U-6 | `flutter/android/app/src/main/res/values/strings.xml`, `flutter/macos/Runner/Configs/AppInfo.xcconfig` | Display name `q2crazyDesk` | Visible product name. Bundle id unchanged so updates keep data. |
+| U-7 | `Cargo.toml` | Path dependency `q2-net` | Tailscale status parser. |
+| U-8 | `src/lib.rs` | `mod q2_peers;` | Peer refresh module. |
+| U-9 | `src/lan.rs` | `q2_peers::refresh()` at the start of `discover` | Discovered list includes Tailscale peers. |
+| U-10 | `src/ui_interface.rs` | `online` field on lan peer maps | The peer card can show Tailscale online state. |
+| U-11 | `flutter/lib/models/peer_model.dart`, `flutter/lib/desktop/pages/connection_page.dart` | Honour a payload `online` flag; show `q2-net-error` in the status line | R-DEV-4 and R-NET-5. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

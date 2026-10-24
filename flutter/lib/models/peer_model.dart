@@ -18,6 +18,7 @@ class Peer {
   String rdpPort;
   String rdpUsername;
   bool online = false;
+  bool listedOnline = false;
   String loginName; //login username
   String device_group_name;
   String note;
@@ -45,7 +46,9 @@ class Peer {
         loginName = json['loginName'] ?? '',
         device_group_name = json['device_group_name'] ?? '',
         note = json['note'] is String ? json['note'] : '',
-        sameServer = json['same_server'];
+        sameServer = json['same_server'],
+        listedOnline = json.containsKey('online'),
+        online = json['online'] == 'Y' || json['online'] == true;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -260,6 +263,9 @@ class Peers extends ChangeNotifier {
     }
 
     for (var peer in peers) {
+      if (peer.listedOnline) {
+        continue;
+      }
       final state = onlineStates[peer.id];
       peer.online = state != null && state != false;
     }

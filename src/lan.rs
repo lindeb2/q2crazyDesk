@@ -75,6 +75,7 @@ pub(super) fn start_listening() -> ResultType<()> {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn discover() -> ResultType<()> {
+    crate::q2_peers::refresh();
     let sockets = send_query()?;
     let rx = spawn_wait_responses(sockets);
     handle_received_peers(rx).await?;

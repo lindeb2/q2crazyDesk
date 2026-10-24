@@ -61,7 +61,7 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 
 - **Decision:** new code lives under `q2/` with its own `Cargo.toml` workspace and `Cargo.lock`. The root `Cargo.toml` is not turned into a workspace.
 - **Why:** adding a `[workspace]` to RustDesk's package would be a wide upstream conflict on every merge. `cargo test --manifest-path q2/Cargo.toml --workspace` is enough for CI.
-- **Consequences:** q2 crates target Rust 1.75 (the Windows CI pin) until a recorded bump. Lan Mouse may force a newer toolchain in phase 2; that bump goes here.
+- **Consequences:** q2 crates target Rust 1.75 (the Windows CI pin) until a recorded bump. Lan Mouse may force a newer toolchain in phase 2; that bump goes here. `q2-net` does not use workspace inheritance, because the root package depends on it by path.
 
 ### D-008 macOS virtual display: never change mode after create (2026-10-24)
 
@@ -79,6 +79,12 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Decision:** Beside input uses Lan Mouse `input-capture` on the controller and RustDesk's existing injection on the target, on the same peer connection with video unsubscribed. Lan Mouse DTLS is the fallback only if R-INPUT-3 fails.
 - **Why:** one connection makes Beside ↔ Inside a video toggle (section 8.2). We do not add a second transport before we have numbers.
 
+### D-011 Direct IP is on, and only inside Tailscale (2026-10-24)
+
+- **Decision:** `q2_init` sets `direct-server` to `Y` on every start and, if unset, `whitelist` to `100.64.0.0/10`. Tailscale peers are written into RustDesk's discovered-peer list with their `100.x` address as the id, so the existing Discovered tab connects straight to port 21118.
+- **Why:** R-NET-2 forbids the public rendezvous. R-NET-3 allows direct IP only through Tailscale. Broadcast LAN discovery does not cross a tailnet.
+- **Consequences:** the Windows CLI is not on `PATH`; `q2-net` looks in `C:\Program Files\Tailscale\tailscale.exe`. A missing Tailscale shows its error in the connection-status line (`q2-net-error`).
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |
@@ -88,4 +94,4 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 | 3 | Virtual-Display-Driver installs silently and displays can be added, removed and resized at runtime | **Silent install: true. Instant add/remove/resize: only via XML + device restart, not a documented IOCTL** | `Community Scripts/silent-install.ps1` downloads the signed driver, trusts the SignPath cert, and installs with NefCon. Resolution changes go through `vdd_settings.xml` / `changeres-VDD.ps1` and a driver restart. This is weaker than Parsec VDD's `vdd -a/-r/-s`. If Lent needs faster plug/unplug than a device restart, revisit SudoVDA or wrap the XML+restart path and measure. |
 | 4 | `CGVirtualDisplay` works on macOS 26 | **Likely true (third-party measurement); must be confirmed on the user's M2 Air** | `go-macos/virtualdisplay` created and removed virtual displays on macOS 26.6.2 (Apple Silicon), including six 1920×1080 displays. Constraint: changing a virtual display's mode can make it un-removable until process exit — the shim must set the mode at create time only. DeskPad's *mirroring* path is broken on the macOS 15+ SDK; we do not need it (RustDesk captures the display). |
 | 5 | RustDesk's Android app builds in CI from the fork without RustDesk's secrets | **True on the first run** | `q2-ci.yml` job `Android arm64` succeeded on 2026-10-24 (run 40130895764) using our own signing key, not RustDesk's secrets. |
-| 6 | Tailscale's peer list can be read without administrator rights on all three desktop OSes | **Likely true for `status` (code + docs); live check waits for Tailscale to be installed** | `tailscale status --json` is the supported CLI. The LocalAPI (`GET /localapi/v0/status`) is used by the `tailscale-localapi` crate. On Windows it talks to the tailscaled named pipe; a logged-in user can read status without an elevated shell. On macOS/Linux it uses the local socket / same-user proof. Privileged operations (changing preferences) can require more rights; we only need the peer list. |
+| 6 | Tailscale's peer list can be read without administrator rights on all three desktop OSes | **True on Windows (`win1`). macOS and Linux still untested on the user's machines** | 2026-10-24: a normal user ran `"C:\Program Files\Tailscale\tailscale.exe" status --json` with no elevation. It returned the local node as online. No other peers were on the tailnet yet. macOS uses the same CLI; confirm when the Mac is installed. |

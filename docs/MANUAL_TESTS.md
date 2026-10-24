@@ -12,8 +12,8 @@ Result values: `pass` / `fail` / `blocked` / `not run`.
   1. On `win1`, open `flutter\build\windows\x64\runner\Release\rustdesk.exe` (or the portable exe from a successful `python build.py --flutter --hwcodec --vram`).
   2. Confirm the main window opens and the tray icon appears.
 - **Expected:** the unmodified RustDesk UI runs.
-- **Result:** not run
-- **Date / notes:**
+- **Result:** pass
+- **Date / notes:** 2026-10-24, `win1`. User started `flutter\build\windows\x64\runner\Release\rustdesk.exe`. The window and the tray icon appeared.
 
 ### T-0-2 CI artifacts
 - **Covers:** phase 0 acceptance
