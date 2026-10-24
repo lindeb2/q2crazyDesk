@@ -81,7 +81,7 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 
 ### D-011 Direct IP is on, and only inside Tailscale (2026-10-24)
 
-- **Decision:** `q2_init` sets `direct-server` to `Y` on every start and, if unset, `whitelist` to `100.64.0.0/10`. Tailscale peers are written into RustDesk's discovered-peer list with their `100.x` address as the id, so the existing Discovered tab connects straight to port 21118.
+- **Decision:** `q2_init` sets `direct-server` to `Y` on every start. `whitelist` is the paired Tailscale addresses only (`q2-paired`). With no pairs it is `127.0.0.1`, because an empty whitelist allows every address. Tailscale peers are written into RustDesk's discovered-peer list with their `100.x` address as the id, so the existing Discovered tab connects straight to port 21118. Pairing is a menu action on each side (R-DEV-3).
 - **Why:** R-NET-2 forbids the public rendezvous. R-NET-3 allows direct IP only through Tailscale. Broadcast LAN discovery does not cross a tailnet.
 - **Consequences:** the Windows CLI is not on `PATH`; `q2-net` looks in `C:\Program Files\Tailscale\tailscale.exe`. A missing Tailscale shows its error in the connection-status line (`q2-net-error`).
 

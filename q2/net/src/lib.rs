@@ -76,6 +76,26 @@ struct PeerJson {
     os: String,
 }
 
+/// IP whitelist for paired peers.
+///
+/// An empty RustDesk whitelist allows every address. When nothing is paired,
+/// return a loopback address so no remote peer matches (R-DEV-3, R-NET-3).
+pub fn paired_whitelist(csv: &str) -> String {
+    let mut ips: Vec<String> = csv
+        .split(',')
+        .filter_map(|s| s.trim().parse::<Ipv4Addr>().ok())
+        .filter(|ip| is_tailscale_ip(*ip))
+        .map(|ip| ip.to_string())
+        .collect();
+    ips.sort();
+    ips.dedup();
+    if ips.is_empty() {
+        "127.0.0.1".to_owned()
+    } else {
+        ips.join(",")
+    }
+}
+
 pub fn is_tailscale_ip(ip: Ipv4Addr) -> bool {
     let ip_u = u32::from(ip);
     let net = u32::from(TAILSCALE_PREFIX);
@@ -203,6 +223,16 @@ pub fn read_status() -> Result<Status, NetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paired_whitelist_drops_other_ranges() {
+        assert_eq!(paired_whitelist(""), "127.0.0.1");
+        assert_eq!(paired_whitelist("10.0.0.2,192.168.1.1"), "127.0.0.1");
+        assert_eq!(
+            paired_whitelist("100.90.0.2, 10.1.1.1, 100.64.0.9"),
+            "100.64.0.9,100.90.0.2"
+        );
+    }
 
     #[test]
     fn range_filter() {

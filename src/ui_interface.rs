@@ -456,6 +456,12 @@ pub fn set_option(key: String, value: String) {
         } else {
             options.insert(key.clone(), value.clone());
         }
+        if key == crate::q2_peers::PAIRED_KEY {
+            options.insert(
+                "whitelist".to_owned(),
+                crate::q2_peers::whitelist_for(&value),
+            );
+        }
         ipc::set_options(options.clone()).ok();
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]

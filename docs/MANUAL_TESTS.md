@@ -41,8 +41,11 @@ Result values: `pass` / `fail` / `blocked` / `not run`.
 - **Result:** not run
 
 ### T-1-3 Pairing (R-DEV-3)
-- **Steps:** reset pairing, connect two devices, approve on both, then try a third unpaired device.
-- **Expected:** only the approved pair can talk.
+- **Steps:**
+  1. On `win1` and the Mac, open Discovered, right-click the other computer, and choose **Pair device**. Do this on both.
+  2. Connect from `win1` to the Mac.
+  3. On `win1`, choose **Unpair device** for the Mac and try to connect again.
+- **Expected:** the paired connection is accepted. After unpairing, the Mac rejects `win1`.
 - **Result:** not run
 
 ### T-1-4 Tailscale missing (R-NET-5)

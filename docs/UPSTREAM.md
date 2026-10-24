@@ -21,7 +21,7 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-2 | `README.md` | Replaced with the q2crazyDesk README | Product description and quick start. RustDesk's README is at https://github.com/rustdesk/rustdesk/blob/1.5.0/README.md. |
 | U-3 | `.github/workflows/q2-ci.yml` | Added (new file; listed so updates are not mistaken for an upstream file) | Trimmed build of Windows x64, macOS arm64, Android arm64, plus `test-q2`. |
 | U-4 | `src/lib.rs` | `mod q2_init;` | Load the q2 startup hook. |
-| U-5 | `src/common.rs` | `q2_init::apply()` at the start of `global_init` | Set the product name and the default Tailscale IP whitelist. |
+| U-5 | `src/common.rs` | `q2_init::apply()` at the start of `global_init` | Set the product name, direct IP, and the paired-only whitelist. |
 | U-6 | `flutter/android/app/src/main/res/values/strings.xml`, `flutter/macos/Runner/Configs/AppInfo.xcconfig` | Display name `q2crazyDesk` | Visible product name. Bundle id unchanged so updates keep data. |
 | U-7 | `Cargo.toml` | Path dependency `q2-net` | Tailscale status parser. |
 | U-8 | `src/lib.rs` | `mod q2_peers;` | Peer refresh module. |
@@ -29,6 +29,8 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-10 | `src/ui_interface.rs` | `online` field on lan peer maps | The peer card can show Tailscale online state. |
 | U-11 | `flutter/lib/models/peer_model.dart`, `flutter/lib/desktop/pages/connection_page.dart` | Honour a payload `online` flag; show `q2-net-error` in the status line | R-DEV-4 and R-NET-5. |
 | U-12 | `build.py` | `build_flutter_dmg` copies `service` into `*.app` | The macOS bundle name follows `PRODUCT_NAME` (`q2crazyDesk.app`). |
+| U-13 | `src/ui_interface.rs` | `set_option` for `q2-paired` also writes `whitelist` | Pairing reaches the service process, not only the window. |
+| U-14 | `flutter/lib/common/widgets/peer_card.dart` | Pair / Unpair on a discovered Tailscale card | R-DEV-3. The user approves each side locally. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

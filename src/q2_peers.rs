@@ -4,14 +4,24 @@ use std::net::Ipv4Addr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use hbb_common::config::{DiscoveryPeer, LanPeers, LocalConfig};
+use hbb_common::config::{Config, DiscoveryPeer, LanPeers, LocalConfig};
 
 use q2_net::{self, Peer};
 
 const NET_ERROR_KEY: &str = "q2-net-error";
+pub const PAIRED_KEY: &str = "q2-paired";
 const REFRESH_GAP: Duration = Duration::from_secs(10);
 
 static LAST_REFRESH: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub fn whitelist_for(paired_csv: &str) -> String {
+    q2_net::paired_whitelist(paired_csv)
+}
+
+pub fn apply_whitelist() {
+    let paired = Config::get_option(PAIRED_KEY);
+    Config::set_option("whitelist".to_owned(), whitelist_for(&paired));
+}
 
 pub fn refresh() {
     if !refresh_due() {

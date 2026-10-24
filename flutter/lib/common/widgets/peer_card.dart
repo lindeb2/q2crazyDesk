@@ -1092,6 +1092,7 @@ class DiscoveredPeerCard extends BasePeerCard {
   Future<List<MenuEntryBase<String>>> _buildMenuItems(
       BuildContext context) async {
     final List<MenuEntryBase<String>> menuItems = [
+      if (_isTailscalePeer(peer.id)) await _pairAction(peer.id),
       _connectAction(context),
       _transferFileAction(context),
       _viewCameraAction(context),
@@ -1132,6 +1133,46 @@ class DiscoveredPeerCard extends BasePeerCard {
     menuItems.add(MenuEntryDivider());
     menuItems.add(_removeAction(peer.id));
     return menuItems;
+  }
+
+  bool _isTailscalePeer(String id) {
+    final parts = id.split('.');
+    if (parts.length != 4) {
+      return false;
+    }
+    final a = int.tryParse(parts[0]);
+    final b = int.tryParse(parts[1]);
+    if (a != 100 || b == null) {
+      return false;
+    }
+    return b >= 64 && b <= 127;
+  }
+
+  Future<MenuEntryBase<String>> _pairAction(String id) async {
+    final raw = await bind.mainGetOption(key: 'q2-paired');
+    final paired = raw.split(',').map((s) => s.trim()).contains(id);
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate(paired ? 'Unpair device' : 'Pair device'),
+        style: style,
+      ),
+      proc: () {
+        final ids = raw
+            .split(',')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+        if (paired) {
+          ids.remove(id);
+        } else {
+          ids.add(id);
+        }
+        final list = ids.toList()..sort();
+        bind.mainSetOption(key: 'q2-paired', value: list.join(','));
+      },
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
   }
 
   @protected

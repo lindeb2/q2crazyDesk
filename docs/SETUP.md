@@ -55,10 +55,10 @@ Install `q2crazydesk-<version>-aarch64.apk`. The APK is signed with the q2crazyD
 
 ## Pairing
 
-1. Start q2crazyDesk on two devices.
-2. Each device lists the Tailscale peers it can see.
-3. Approve the pairing on **both** sides. Unpaired devices can never connect.
-4. After that, the devices are trusted until you remove the pair.
+1. Start q2crazyDesk on two devices. Both must be signed in to the same Tailscale tailnet.
+2. Open **Discovered** on each device. Right-click the other computer and choose **Pair device**.
+3. Do that on **both** sides. A device that is not paired on the target is rejected. Remove a pair with **Unpair device**.
+4. `win2` has no keyboard or mouse. Plug in a mouse once, pair from its Discovered menu, then unplug it.
 
 ## Wake-on-LAN
 
