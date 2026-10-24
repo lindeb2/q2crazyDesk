@@ -1,0 +1,91 @@
+# Decisions
+
+Decisions that deviate from, refine, or verify `ONESHOT_PROMPT.md`. Newest decisions are appended at the end of each section. Every entry says what was decided, why, and what it affects.
+
+## Environment and repository
+
+### D-001 Repository is public (2026-10-24)
+
+- **Decision:** `lindeb2/q2crazyDesk` was created private as the brief says, then made public on the user's instruction ("public, for now at least").
+- **Why:** a private repository on GitHub Free gets 2,000 Actions minutes per month, and macOS minutes count 10x. One full build (Windows + macOS + Android) costs roughly 400-550 of those minutes, so "build on every push" was impossible in a private repository. Standard GitHub-hosted runners are free and unlimited for public repositories.
+- **Consequences:** never commit secrets, device addresses, Tailscale node keys or personal data. Secrets (the Android signing key) live in GitHub Actions secrets and in `%USERPROFILE%\q2crazyDesk-secrets` on `win1`, never in the repository. If the repository is made private again, `q2-ci.yml` must be cut down to on-demand builds.
+
+### D-002 Base version: RustDesk 1.5.0 (2026-10-24)
+
+- **Decision:** `main` starts at the RustDesk tag `1.5.0` (released 2026-09-30), the latest stable release, with the full upstream history. Upstream tags are not pushed to `origin` (they would trigger tag workflows and clutter releases).
+- **Consequences:** see `docs/UPSTREAM.md` and `docs/UPDATING.md`.
+
+### D-003 Toolchain pins follow RustDesk 1.5.0 CI (2026-10-24)
+
+From `.github/workflows/flutter-build.yml` and `bridge.yml` at `1.5.0`:
+
+| Tool | Version | Notes |
+|---|---|---|
+| Rust (Windows, Android, bridge) | 1.75 | RustDesk keeps 1.75 for Windows 7 support and the old Sciter ABI. |
+| Rust (macOS) | 1.81 | Required by the `cidre` crate. |
+| Flutter (build) | 3.24.5 | Patched with `.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff`; on Windows the engine is replaced by RustDesk's custom `windows-x64-release.zip` (flutter/flutter#155685). |
+| Flutter (bridge generation) | 3.22.3 | |
+| flutter_rust_bridge_codegen | 1.80.1 | with `cargo-expand` 1.0.95 |
+| LLVM / libclang | 15.0.6 | for bindgen |
+| vcpkg | commit `9e593bb18ea69cc5095e012465dcd675a822ed0d` (2026.07.29) | |
+| Android NDK | r28c | `cargo-ndk` 3.1.2 |
+
+If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates), the bump is recorded here with the reason. Windows 7 support is not a goal, so moving Windows off 1.75 is acceptable.
+
+### D-004 Local Windows build uses Visual Studio 2022 Build Tools (2026-10-24)
+
+- **Finding:** `win1` had only Visual Studio Community 2026 (MSVC 14.51) without the "C++ CMake tools" component. Flutter 3.24.5 predates Visual Studio 2026: it maps unknown Visual Studio versions to the "Visual Studio 16 2019" CMake generator and requires the CMake component, so `flutter build windows` cannot work with VS 2026 alone.
+- **Decision:** install Visual Studio 2022 Build Tools side by side (MSVC v143, C++ CMake tools, Windows 11 SDK 26100, ATL), which matches RustDesk's `windows-2022` CI runners. Flutter picks the newest installation that has all required components, which is VS 2022.
+- **Local tool locations on `win1`:** `C:\dev\flutter` (3.24.5, patched, RustDesk engine), `C:\dev\llvm` (15.0.6, unpacked without admin rights), `C:\dev\vcpkg` (pinned commit), Rust via `rustup` in `%USERPROFILE%\.cargo`. User environment variables: `VCPKG_ROOT=C:\dev\vcpkg`, `LIBCLANG_PATH=C:\dev\llvm\bin`.
+
+### D-005 CI layout (2026-10-24)
+
+- **Decision:** one workflow, `.github/workflows/q2-ci.yml`, derived from RustDesk's `flutter-build.yml` and `bridge.yml`. It builds Windows x64 (portable exe + msi), macOS arm64 (dmg) and Android arm64 (apk) on every push to `main` and on pull requests, and publishes a GitHub Release for `v*` tags.
+- RustDesk's own auto-triggered workflows (nightly, tag, F-Droid, webpki-roots, ci, flutter-ci, playground) were deleted, because they would run RustDesk's release pipeline. RustDesk's reusable workflows (`flutter-build.yml`, `bridge.yml`, `third-party-RustDeskTempTopMostWindow.yml`) and the manual `clear-cache.yml` are kept unmodified: nothing calls them, and they serve as the reference for porting upstream toolchain bumps.
+- Steps for RustDesk-only features that are out of scope (privacy-mode helper `RustDeskTempTopMostWindow`, remote printer driver, signing service, SBOM, x86/arm32/Linux/iOS/web targets) are omitted.
+- The vcpkg installed tree is cached with `actions/cache`, keyed on the vcpkg commit and the hash of `vcpkg.json` and RustDesk's overlay ports, because vcpkg's `x-gha` binary cache is not reliable.
+
+### D-006 Android signing key (2026-10-24)
+
+- **Decision:** CI signs the APK with a q2crazyDesk release key (RSA 4096, alias `q2crazydesk`), stored as the Actions secrets `ANDROID_SIGNING_KEY`, `ANDROID_ALIAS`, `ANDROID_KEY_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`. A copy of the keystore and its password is in `%USERPROFILE%\q2crazyDesk-secrets` on `win1`.
+- **Why:** a debug key is generated fresh on every CI runner, so each build would have a different signature and Android would refuse to update the installed app without uninstalling it (and losing its pairing data).
+
+## User answers (2026-10-24)
+
+- Keyboard layout: Swedish on `win1`, `win2` and the Mac.
+- Mac: MacBook Air M2 on **macOS 26 Tahoe**.
+- `win2`: **Windows 10 Pro**.
+- Input devices: both Windows PCs are desktops. Only `win1` has a physical keyboard and mouse; the Mac has its built-in keyboard and trackpad. **`win2` will have no physical keyboard or mouse attached.** Consequences: R-INPUT-6 (visible cursor without a mouse) and R-LOGIN-1 (controlling `win2`'s login screen from `win1`) are required for `win2` to be usable at all.
+
+### D-007 q2 crates are a separate Cargo workspace (2026-10-24)
+
+- **Decision:** new code lives under `q2/` with its own `Cargo.toml` workspace and `Cargo.lock`. The root `Cargo.toml` is not turned into a workspace.
+- **Why:** adding a `[workspace]` to RustDesk's package would be a wide upstream conflict on every merge. `cargo test --manifest-path q2/Cargo.toml --workspace` is enough for CI.
+- **Consequences:** q2 crates target Rust 1.75 (the Windows CI pin) until a recorded bump. Lan Mouse may force a newer toolchain in phase 2; that bump goes here.
+
+### D-008 macOS virtual display: never change mode after create (2026-10-24)
+
+- **Decision:** the `CGVirtualDisplay` shim sets resolution and size at construction and does not call `CGDisplaySetDisplayMode` or a configure-origin transaction that changes mode.
+- **Why:** measured on macOS 26.6.2 — a mode change makes the display survive `Release` until the process exits.
+- **Consequences:** to resize a lent display, destroy and recreate it.
+
+### D-009 File drag: read ShareCursor before writing our own (2026-10-24)
+
+- **Decision:** ShareCursor (MIT/Apache-2.0, Rust, pre-release) is the new first candidate for R-FILES-2. Phase 6 starts by reading its OLE / `NSDraggingSession` path. If it is too raw to merge, we build the pipeline in `docs/ARCHITECTURE.md` ourselves.
+- **Why:** the brief said no good open-source implementation existed. ShareCursor appeared in 2026 and claims reliable chunked drag on Windows and macOS. Deskflow remains GPL-2.0-only (study, do not copy).
+
+### D-010 Input path stays on RustDesk until measured (2026-10-24)
+
+- **Decision:** Beside input uses Lan Mouse `input-capture` on the controller and RustDesk's existing injection on the target, on the same peer connection with video unsubscribed. Lan Mouse DTLS is the fallback only if R-INPUT-3 fails.
+- **Why:** one connection makes Beside ↔ Inside a video toggle (section 8.2). We do not add a second transport before we have numbers.
+
+## Assumptions from section 7
+
+| # | Assumption | Status | Evidence |
+|---|---|---|---|
+| 1 | RustDesk's connection can run input-only, with the video encoder stopped, and add little latency | **Likely true (code reading); latency not yet measured** | The client can send `Misc::CaptureDisplays { set: [] }`. `Connection::capture_displays` (`src/server/connection.rs`) passes an empty set with include and exclude both true to `Server::capture_displays` (`src/server.rs`), which unsubscribes the connection from every video service. Video services run inside `ServiceTmpl::run` (`src/server/service.rs`), whose loop only calls the capture/encode callback while `has_subscribes()` is true, so capture and encoding stop when the last subscriber leaves. Latency is measured in phase 2 (R-INPUT-3). |
+| 2 | Lan Mouse `input-capture`/`input-emulation` work on Windows 11 and macOS 26 and can be embedded as libraries | **Likely true on Windows 11 (published backends); macOS 26 untested on the user's Mac** | Crates.io `input-capture` / `input-emulation` 0.4.0 (2026-06-12) are standalone GPL-3.0-or-later libraries. Lan Mouse v0.11.0 documents Windows and macOS capture and emulation backends. A Windows capture fix for stuck keys shipped in that release. Embed as path deps from `third_party/lan-mouse` in phase 2; confirm on `win1` then on the Mac. |
+| 3 | Virtual-Display-Driver installs silently and displays can be added, removed and resized at runtime | **Silent install: true. Instant add/remove/resize: only via XML + device restart, not a documented IOCTL** | `Community Scripts/silent-install.ps1` downloads the signed driver, trusts the SignPath cert, and installs with NefCon. Resolution changes go through `vdd_settings.xml` / `changeres-VDD.ps1` and a driver restart. This is weaker than Parsec VDD's `vdd -a/-r/-s`. If Lent needs faster plug/unplug than a device restart, revisit SudoVDA or wrap the XML+restart path and measure. |
+| 4 | `CGVirtualDisplay` works on macOS 26 | **Likely true (third-party measurement); must be confirmed on the user's M2 Air** | `go-macos/virtualdisplay` created and removed virtual displays on macOS 26.6.2 (Apple Silicon), including six 1920×1080 displays. Constraint: changing a virtual display's mode can make it un-removable until process exit — the shim must set the mode at create time only. DeskPad's *mirroring* path is broken on the macOS 15+ SDK; we do not need it (RustDesk captures the display). |
+| 5 | RustDesk's Android app builds in CI from the fork without RustDesk's secrets | **True on the first run** | `q2-ci.yml` job `Android arm64` succeeded on 2026-10-24 (run 40130895764) using our own signing key, not RustDesk's secrets. |
+| 6 | Tailscale's peer list can be read without administrator rights on all three desktop OSes | **Likely true for `status` (code + docs); live check waits for Tailscale to be installed** | `tailscale status --json` is the supported CLI. The LocalAPI (`GET /localapi/v0/status`) is used by the `tailscale-localapi` crate. On Windows it talks to the tailscaled named pipe; a logged-in user can read status without an elevated shell. On macOS/Linux it uses the local socket / same-user proof. Privileged operations (changing preferences) can require more rights; we only need the peer list. |
