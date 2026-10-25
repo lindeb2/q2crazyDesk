@@ -25,7 +25,7 @@ If Tailscale is not running, q2crazyDesk shows an error and how to start it. An 
 
 ## Installing the app
 
-Download the latest artifacts from https://github.com/lindeb2/q2crazyDesk/releases/latest.
+Download the latest artifacts from the [q2crazyDesk CI](https://github.com/lindeb2/q2crazyDesk/actions/workflows/q2-ci.yml) run on `main`. There is no GitHub Release until `v1.0.0`. The green run `40147278687` has `q2crazydesk-windows-x86_64` (msi and portable exe), `q2crazydesk-macos-aarch64` (dmg), and `q2crazydesk-android-aarch64` (apk).
 
 ### Windows
 

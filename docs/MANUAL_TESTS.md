@@ -21,8 +21,8 @@ Result values: `pass` / `fail` / `blocked` / `not run`.
   1. Open the latest green `q2crazyDesk CI` run on `main`.
   2. Confirm artifacts `q2crazydesk-windows-x86_64`, `q2crazydesk-macos-aarch64`, `q2crazydesk-android-aarch64` are present.
 - **Expected:** all three jobs succeeded and uploaded artifacts.
-- **Result:** not run
-- **Date / notes:**
+- **Result:** pass
+- **Date / notes:** 2026-10-25, run 40147278687. Jobs Windows x64, macOS arm64, and Android arm64 succeeded and uploaded `q2crazydesk-windows-x86_64`, `q2crazydesk-macos-aarch64`, and `q2crazydesk-android-aarch64`.
 
 ## Phase 1 — devices, network, service
 
@@ -47,6 +47,7 @@ Result values: `pass` / `fail` / `blocked` / `not run`.
   3. On `win1`, choose **Unpair device** for the Mac and try to connect again.
 - **Expected:** the paired connection is accepted. After unpairing, the Mac rejects `win1`.
 - **Result:** not run
+- **Date / notes:** 2026-10-25. On the Mac, Pair device and Unpair device work. A connection from that build reached the one-time password prompt. Passwordless login is in run 40147278687, which was not the build under test.
 
 ### T-1-4 Tailscale missing (R-NET-5)
 - **Steps:** stop Tailscale on `win1` and open the app.
