@@ -103,6 +103,16 @@ pub fn is_tailscale_ip(ip: Ipv4Addr) -> bool {
     (ip_u & mask) == (net & mask)
 }
 
+/// True when `ip` is a Tailscale address listed in a comma-separated pair list.
+pub fn is_paired_ip(csv: &str, ip: Ipv4Addr) -> bool {
+    if !is_tailscale_ip(ip) {
+        return false;
+    }
+    csv.split(',')
+        .filter_map(|s| s.trim().parse::<Ipv4Addr>().ok())
+        .any(|paired| paired == ip)
+}
+
 pub fn parse_status_json(json: &str) -> Result<Status, serde_json::Error> {
     let status: StatusJson = serde_json::from_str(json)?;
     let mut peers = Vec::new();
@@ -241,6 +251,15 @@ mod tests {
         assert!(!is_tailscale_ip(Ipv4Addr::new(100, 128, 0, 1)));
         assert!(!is_tailscale_ip(Ipv4Addr::new(192, 168, 1, 10)));
         assert!(!is_tailscale_ip(Ipv4Addr::new(10, 0, 0, 2)));
+    }
+
+    #[test]
+    fn paired_ip_requires_tailscale_and_list() {
+        let list = "100.64.0.9,100.90.0.2";
+        assert!(is_paired_ip(list, Ipv4Addr::new(100, 90, 0, 2)));
+        assert!(!is_paired_ip(list, Ipv4Addr::new(100, 90, 0, 3)));
+        assert!(!is_paired_ip(list, Ipv4Addr::new(10, 0, 0, 2)));
+        assert!(!is_paired_ip("10.0.0.2", Ipv4Addr::new(10, 0, 0, 2)));
     }
 
     #[test]

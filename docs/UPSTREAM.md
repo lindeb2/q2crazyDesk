@@ -32,6 +32,7 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-13 | `src/ui_interface.rs` | `set_option` for `q2-paired` also writes `whitelist` | Pairing reaches the service process, not only the window. |
 | U-14 | `flutter/lib/common/widgets/peer_card.dart` | Pair / Unpair on a discovered Tailscale card | R-DEV-3. The user approves each side locally. |
 | U-15 | `flutter/macos/Runner/Release.entitlements` | Disable library validation; allow incoming network | Release was missing `network.server` (present on the debug profile) and rejected a Flutter framework signed with another Team ID. |
+| U-16 | `src/server/connection.rs` | Paired Tailscale address skips the one-time password | R-DEV-3. The IP whitelist still rejects everyone else. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

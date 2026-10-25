@@ -23,6 +23,13 @@ pub fn apply_whitelist() {
     Config::set_option("whitelist".to_owned(), whitelist_for(&paired));
 }
 
+pub fn is_paired_peer(ip: &str) -> bool {
+    let Ok(addr) = ip.parse::<Ipv4Addr>() else {
+        return false;
+    };
+    q2_net::is_paired_ip(&Config::get_option(PAIRED_KEY), addr)
+}
+
 pub fn refresh() {
     if !refresh_due() {
         return;
