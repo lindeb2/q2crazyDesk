@@ -6408,6 +6408,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "q2-layout"
+version = "0.1.0"
+dependencies = [
+ "serde 1.0.228",
+]
+
+[[package]]
 name = "q2-net"
 version = "0.1.0"
 dependencies = [
@@ -7160,6 +7167,7 @@ dependencies = [
  "piet",
  "piet-coregraphics",
  "portable-pty",
+ "q2-layout",
  "q2-net",
  "qrcode-generator",
  "rdev",

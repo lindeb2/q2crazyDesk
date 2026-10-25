@@ -1,10 +1,10 @@
 [package]
 name = "q2-layout"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+rust-version = "1.75"
 description = "Millimetre canvas, monitor model, edge links, and profiles (R-LAYOUT)"
 
 [dependencies]
-serde.workspace = true
+serde = { version = "1", features = ["derive"] }

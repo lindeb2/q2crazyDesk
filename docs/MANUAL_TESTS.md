@@ -26,6 +26,8 @@ Result values: `pass` / `fail` / `blocked` / `not run`.
 
 ## Phase 1 — devices, network, service
 
+User confirmed on 2026-10-25, after run 40154488523: one card per computer, the Mac icon, the status line, and connecting both ways. The checks below are still open.
+
 ### T-1-1 Online after cold boot (R-DEV-4, R-SVC-1, R-SVC-2, R-NET-4)
 - **Steps:**
   1. Install the Windows build on `win1` and `win2` with the service.

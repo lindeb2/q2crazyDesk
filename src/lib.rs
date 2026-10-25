@@ -74,4 +74,5 @@ pub mod virtual_display_manager;
 
 mod kcp_stream;
 mod q2_init;
+mod q2_local;
 mod q2_peers;

@@ -37,6 +37,7 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-18 | `src/ui_interface.rs` | Discovered list returns only Tailscale addresses | The same Mac also arrives as a RustDesk ID from LAN broadcast. That card uses the public rendezvous and is the one that does not connect. |
 | U-19 | `flutter/lib/desktop/pages/connection_page.dart` | Status dot follows a Tailscale error, and the public-server hint hides while that error is shown | The service dot stayed green beside `tailscale status --json`. |
 | U-20 | `src/platform/windows.rs` | In-app install renames `rustdesk.exe` to `q2crazyDesk.exe` | The copy left the old file name, then startup looked for `q2crazyDesk.exe` and the pink Install card came back. |
+| U-21 | `Cargo.toml`, `src/lib.rs` | Depend on `q2-layout`; `mod q2_local` | Local monitor crossing uses the millimetre canvas (R-LAYOUT-4). |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

@@ -34,6 +34,8 @@ Third-party trees (phase 2 and 5): `third_party/lan-mouse`, `third_party/macos-v
 
 ## Transport decision (R-INPUT-3)
 
+**Local monitors (R-LAYOUT-4).** The main window process reads each monitor's pixel rect and `GetDeviceCaps` size in millimetres, places them on the canvas in that arrangement, and on a crossing moves the cursor so the physical height is kept. Same-sized panels are left where Windows put them. The service and the tray do not run this. Known limit: while another computer is controlling this one, the window process can still correct a crossing, because it does not see the service's session list.
+
 **Intended:** one RustDesk connection, video off for Beside. Target added latency on the home network: under 10 ms from controller input to target cursor motion.
 
 **Fallback:** if that path cannot meet the budget or cannot express edge-crossing cleanly, Beside input moves to Lan Mouse's DTLS protocol. RustDesk keeps clipboard, files, audio, and video.
