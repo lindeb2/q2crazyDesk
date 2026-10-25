@@ -4,7 +4,11 @@
 //! of PowerToys Mouse Without Borders (MIT),
 //! https://github.com/microsoft/PowerToys, studied 2026-10-24.
 
+mod capture;
+
 use std::collections::{BTreeMap, BTreeSet};
+
+pub use capture::{Capture, Motion};
 
 use q2_keys::Key;
 use q2_layout::{try_cross, Canvas, Crossing, DeviceId, Edge, MonitorId, EDGE_EPS_MM};
