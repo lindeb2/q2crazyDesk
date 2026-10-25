@@ -85,6 +85,18 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Why:** R-NET-2 forbids the public rendezvous. R-NET-3 allows direct IP only through Tailscale. Broadcast LAN discovery does not cross a tailnet.
 - **Consequences:** the Windows CLI is not on `PATH`; `q2-net` looks in `C:\Program Files\Tailscale\tailscale.exe`. A missing Tailscale shows its error in the connection-status line (`q2-net-error`). A paired peer is logged in without the one-time password.
 
+### D-012 Beside edge capture starts from RustDesk's `rdev::grab`, not Lan Mouse (2026-10-25)
+
+- **Finding:** `input-capture` / `input-emulation` 0.4.0 (crates.io index, 2026-06) pull in `ashpd ^0.13.9`, `core-graphics ^0.25`, `keycode ^1`, `thiserror ^2` and `reis ^0.5`. That is a different dependency graph from RustDesk 1.5.0's pinned one (Rust 1.75 on Windows, its own `core-graphics` and `rdev` forks). The index does not publish an MSRV. Cargo 1.75 cannot even parse a dependency manifest that needs `edition2024` (seen while type-checking, with `compiler_builtins 0.1.160`), so one newer transitive crate in `Cargo.lock` can break the pinned Windows build.
+- **Decision:** the first implementation of edge capture reuses `rustdesk-org/rdev` (already a dependency, rung 1 of the ladder). On Windows its `grab` installs `WH_KEYBOARD_LL` and `WH_MOUSE_LL` and swallows an event when the callback returns `None`. RustDesk's relative mouse mode already uses it the same way. The cursor is held at the exit edge and motion is sent as deltas. macOS has `src/macos/grab.rs` in the same fork; its mouse blocking has not been read yet.
+- **Lan Mouse stays the fallback.** If `rdev::grab` cannot hold the cursor cleanly at an edge on Windows or macOS 26, vendor `input-capture` under `third_party/lan-mouse` and record the Rust bump here (section 8.2).
+- **Affects:** assumption 2 below, `docs/SOURCING.md`, phase 2.
+
+### D-013 Windows-only code is checked before it is pushed (2026-10-25)
+
+- **Finding:** the Windows build of `d5bfb2e` failed with one error: `Vec::new()` in `src/q2_local.rs::read_panels` had no type (E0282 on Rust 1.75). Linux CI never compiles `#[cfg(windows)]` code, so only the Windows job could see it.
+- **Decision:** Windows-only code is type-checked against `x86_64-pc-windows-gnu` with Rust 1.75 (`-Zbuild-std`, `RUSTC_BOOTSTRAP=1`) in a scratch crate before it is committed. The same file, with the `cfg(windows)` lines removed and `crate::platform::windows` stubbed, was used to reproduce and confirm the fix.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

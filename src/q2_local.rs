@@ -137,7 +137,7 @@ fn read_panels() -> Vec<q2_layout::OsPanel> {
         TRUE
     }
 
-    let mut found = Vec::new();
+    let mut found: Vec<Found> = Vec::new();
     unsafe {
         EnumDisplayMonitors(
             std::ptr::null_mut(),
