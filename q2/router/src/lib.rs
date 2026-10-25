@@ -4,10 +4,12 @@
 //! of PowerToys Mouse Without Borders (MIT),
 //! https://github.com/microsoft/PowerToys, studied 2026-10-24.
 
+mod beside;
 mod capture;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use beside::{Beside, Button, Input, Out, Step, Target};
 pub use capture::{Capture, Motion};
 
 use q2_keys::Key;

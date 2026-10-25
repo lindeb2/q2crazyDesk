@@ -98,6 +98,17 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Decision:** Windows-only code is type-checked against `x86_64-pc-windows-gnu` with Rust 1.75 (`-Zbuild-std`, `RUSTC_BOOTSTRAP=1`) in a scratch crate before it is committed. The same file, with the `cfg(windows)` lines removed and `crate::platform::windows` stubbed, was used to reproduce and confirm the fix.
 - **Linux check of the whole crate:** the cross-platform part of `rustdesk` (including everything under the `flutter` feature) is checked with `cargo check --lib --features flutter,linux-pkg-config`. It needs the system libraries (`libvpx`, `libyuv`, `libaom`, `libopus`, GStreamer, GTK, `libxdo`), a `libyuv.pc` file on `PKG_CONFIG_PATH`, a `git config url.<github mirror>.insteadOf` for `chromium.googlesource.com/webm/libwebm`, and an empty stand-in for the generated `src/bridge_generated.rs` that implements `IntoDart`, `IntoDartExceptPrimitive` and `rust2dart::IntoIntoDart` for `EventToUI`. The stand-in is git-ignored and never committed. A warm check takes about 20 seconds.
 
+### D-014 Beside on Windows: interim layout, absolute moves, rescue key (2026-10-25)
+
+- **State machine:** `q2-router` `Beside` (pure, 9 tests) decides everything; `src/q2_beside.rs` only carries out its answers. A physical event is a hook event that is not flagged as injected.
+- **Interim layout (until the canvas editor in phase 4):** the first paired Tailscale peer that is online sits directly to the right of `win1`'s rightmost monitor, top-aligned, and the edge is linked with `auto_link`. The peer's physical size is not in the RustDesk protocol, so it is computed from its pixels at 96 dpi. That makes R-LAYOUT-3 exact only when the real monitor is near 96 dpi, and it is the first thing the editor and the peer-size exchange (section 8.3) must replace. Only the peer's display at origin (0,0) is used.
+- **Absolute moves:** while captured, the cursor is held at the centre of the monitor it left from, the hook reports where it would have gone, and the distance from the centre is the delta. A virtual cursor in target pixels follows the deltas and `MOUSE_TYPE_MOVE` with absolute pixels is sent, so the target never sees relative motion and clamping is identical on both sides. `MOUSE_TYPE_MOVE_RELATIVE` is not used.
+- **Wheel:** sub-notch wheel movement is added up to whole notches. Sign follows the server code (`input_service.rs`: up is positive y, left is positive x). Not yet run against a peer (T-2-2).
+- **Keys:** physical keys become `rdev::Event` values and go through `keyboard::client::process_event_with_session` in map mode, so scan codes are translated for a Windows, macOS or Linux peer by RustDesk's own tables. Everything held is released when control leaves.
+- **Rescue (R-INPUT-5):** Ctrl+Alt+Shift+Esc while captured gives control back at once. A lost or unusable session also ends a capture.
+- **Connection:** one session per paired online peer, opened headless by `q2_session`; a session that is down for 30 s is closed and opened again.
+- **Not done yet:** jump hotkeys and guards (R-INPUT-4, R-INPUT-5 guards), the cursor on a peer without a mouse (R-INPUT-6), multiple peers, edges other than the right edge of the rightmost monitor, macOS as controller, `last input wins` (R-DEV-2) across controllers.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

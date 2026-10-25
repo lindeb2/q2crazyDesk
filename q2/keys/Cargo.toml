@@ -1,10 +1,10 @@
 [package]
 name = "q2-keys"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+rust-version = "1.75"
 description = "Key mapping profiles and Swedish layout translation (R-KEYS)"
 
 [dependencies]
-serde.workspace = true
+serde = { version = "1", features = ["derive"] }

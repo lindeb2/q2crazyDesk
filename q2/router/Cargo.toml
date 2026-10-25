@@ -1,12 +1,12 @@
 [package]
 name = "q2-router"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+rust-version = "1.75"
 description = "Input routing state machine (R-DEV-2, R-INPUT)"
 
 [dependencies]
 q2-layout = { path = "../layout" }
 q2-keys = { path = "../keys" }
-serde.workspace = true
+serde = { version = "1", features = ["derive"] }

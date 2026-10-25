@@ -6408,6 +6408,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "q2-keys"
+version = "0.1.0"
+dependencies = [
+ "serde 1.0.228",
+]
+
+[[package]]
 name = "q2-layout"
 version = "0.1.0"
 dependencies = [
@@ -6420,6 +6427,15 @@ version = "0.1.0"
 dependencies = [
  "serde 1.0.228",
  "serde_json 1.0.118",
+]
+
+[[package]]
+name = "q2-router"
+version = "0.1.0"
+dependencies = [
+ "q2-keys",
+ "q2-layout",
+ "serde 1.0.228",
 ]
 
 [[package]]
@@ -7169,6 +7185,7 @@ dependencies = [
  "portable-pty",
  "q2-layout",
  "q2-net",
+ "q2-router",
  "qrcode-generator",
  "rdev",
  "remote_printer",

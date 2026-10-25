@@ -64,8 +64,8 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 - **Result:** not run
 
 ### T-2-2 Cross to `win2` and the Mac (R-PLACE-1, R-LAYOUT-3)
-- **Steps:** sit at `win1`. Cross into `win2`, then into the Mac, at a marked physical height (for example 100 mm from the top).
-- **Expected:** the cursor appears 100 mm from the top on the target. No video window opens.
+- **Steps:** sit at `win1`. Cross into `win2`, then into the Mac, at a marked physical height (for example 100 mm from the top). While captured, scroll up and down one notch and press Ctrl+Alt+Shift+Esc.
+- **Expected:** the cursor appears 100 mm from the top on the target. No video window opens. Scrolling up scrolls up on the target (the wheel sign convention in `src/q2_beside.rs` was read from the server code and has not been run). The rescue combination returns control to `win1` and releases held keys.
 - **Result:** not run
 
 ### T-2-3 Last input wins (R-DEV-2)

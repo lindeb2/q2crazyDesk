@@ -44,9 +44,22 @@ pub fn session_for(peer: &str) -> Option<FlutterSession> {
     sessions::get_session_by_session_id(&id_for(peer)?)
 }
 
-/// True once login has finished and the peer's info is known.
+/// True while the connection is up and the peer's info is known.
 pub fn is_ready(peer: &str) -> bool {
-    session_for(peer).is_some_and(|s| s.lc.read().map(|lc| lc.peer_info.is_some()).unwrap_or(false))
+    let Some(session) = session_for(peer) else {
+        return false;
+    };
+    let connected = session
+        .connection_round_state
+        .lock()
+        .map(|state| state.is_connected())
+        .unwrap_or(false);
+    let known = session
+        .lc
+        .read()
+        .map(|lc| lc.peer_info.is_some())
+        .unwrap_or(false);
+    connected && known
 }
 
 /// Open a session to `peer` (or return the one that is already open) and keep

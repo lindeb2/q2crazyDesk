@@ -24,7 +24,7 @@ fn start_windows() {
 }
 
 #[cfg(windows)]
-fn is_main_window() -> bool {
+pub(crate) fn is_main_window() -> bool {
     !std::env::args().any(|arg| {
         matches!(
             arg.as_str(),
@@ -97,7 +97,7 @@ fn hit_panel(panels: &[q2_layout::OsPanel], x: i32, y: i32) -> Option<u32> {
 }
 
 #[cfg(windows)]
-fn read_panels() -> Vec<q2_layout::OsPanel> {
+pub(crate) fn read_panels() -> Vec<q2_layout::OsPanel> {
     use std::mem::size_of;
     use winapi::{
         shared::{
