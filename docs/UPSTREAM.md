@@ -33,6 +33,10 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-14 | `flutter/lib/common/widgets/peer_card.dart` | Pair / Unpair on a discovered Tailscale card | R-DEV-3. The user approves each side locally. |
 | U-15 | `flutter/macos/Runner/Release.entitlements` | Disable library validation; allow incoming network | Release was missing `network.server` (present on the debug profile) and rejected a Flutter framework signed with another Team ID. |
 | U-16 | `src/server/connection.rs` | Paired Tailscale address skips the one-time password | R-DEV-3. The IP whitelist still rejects everyone else. |
+| U-17 | `src/lan.rs` | LAN discovery no longer marks a Tailscale peer offline | A broadcast reply used to set every discovered peer offline, so the 100.x cards stayed orange while the numeric-ID duplicate stayed green. |
+| U-18 | `src/ui_interface.rs` | Discovered list returns only Tailscale addresses | The same Mac also arrives as a RustDesk ID from LAN broadcast. That card uses the public rendezvous and is the one that does not connect. |
+| U-19 | `flutter/lib/desktop/pages/connection_page.dart` | Status dot follows a Tailscale error, and the public-server hint hides while that error is shown | The service dot stayed green beside `tailscale status --json`. |
+| U-20 | `src/platform/windows.rs` | In-app install renames `rustdesk.exe` to `q2crazyDesk.exe` | The copy left the old file name, then startup looked for `q2crazyDesk.exe` and the pink Install card came back. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

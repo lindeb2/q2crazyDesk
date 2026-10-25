@@ -81,9 +81,10 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
 
     setupServerWidget() => Flexible(
           child: Offstage(
-            offstage: !(!_svcStopped.value &&
-                stateGlobal.svcStatus.value == SvcStatus.ready &&
-                _svcIsUsingPublicServer.value),
+            offstage: _q2NetError.value.isNotEmpty ||
+                !(!_svcStopped.value &&
+                    stateGlobal.svcStatus.value == SvcStatus.ready &&
+                    _svcIsUsingPublicServer.value),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -118,7 +119,8 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
               width: 8,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(4),
-                color: _svcStopped.value ||
+                color: _q2NetError.value.isNotEmpty ||
+                        _svcStopped.value ||
                         stateGlobal.svcStatus.value == SvcStatus.connecting
                     ? kColorWarn
                     : (stateGlobal.svcStatus.value == SvcStatus.ready

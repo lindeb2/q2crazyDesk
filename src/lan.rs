@@ -314,7 +314,9 @@ fn spawn_wait_responses(sockets: Vec<UdpSocket>) -> UnboundedReceiver<config::Di
 async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>) -> ResultType<()> {
     let mut peers = config::LanPeers::load().peers;
     peers.iter_mut().for_each(|peer| {
-        peer.online = false;
+        if !crate::q2_peers::is_tailscale_peer_id(&peer.id) {
+            peer.online = false;
+        }
     });
 
     let mut response_set = HashSet::new();

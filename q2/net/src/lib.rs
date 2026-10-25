@@ -141,8 +141,20 @@ fn to_peer(p: PeerJson, this_machine: bool) -> Peer {
         dns_name: p.dns_name.trim_end_matches('.').to_string(),
         ips,
         online: p.online,
-        os: p.os,
+        os: platform_label(&p.os),
         this_machine,
+    }
+}
+
+/// Tailscale reports `macOS` and `windows`. The peer card only treats `Mac OS` as a Mac.
+pub fn platform_label(os: &str) -> String {
+    match os.trim().to_ascii_lowercase().as_str() {
+        "macos" | "mac" | "darwin" | "mac os" => "Mac OS".to_owned(),
+        "windows" | "win" | "win32" => "Windows".to_owned(),
+        "linux" => "Linux".to_owned(),
+        "android" => "Android".to_owned(),
+        "ios" => "iOS".to_owned(),
+        _ => os.to_owned(),
     }
 }
 
@@ -166,9 +178,9 @@ fn tailscale_candidates() -> &'static [&'static str] {
     #[cfg(target_os = "macos")]
     {
         &[
-            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-            "/opt/homebrew/bin/tailscale",
             "/usr/local/bin/tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
         ]
     }
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -187,6 +199,7 @@ pub enum NetError {
     TailscaleNotRunning,
     Io(io::Error),
     Json(serde_json::Error),
+    NoJson,
 }
 
 impl std::fmt::Display for NetError {
@@ -198,6 +211,7 @@ impl std::fmt::Display for NetError {
             ),
             NetError::Io(e) => write!(f, "tailscale: {e}"),
             NetError::Json(e) => write!(f, "tailscale status --json: {e}"),
+            NetError::NoJson => write!(f, "Tailscale returned no status"),
         }
     }
 }
@@ -205,6 +219,9 @@ impl std::fmt::Display for NetError {
 fn tailscale_status() -> io::Result<std::process::Output> {
     let mut cmd = Command::new(tailscale_bin());
     cmd.args(["status", "--json"]);
+    // Without a terminal, the Mac app binary opens the GUI and prints nothing.
+    #[cfg(target_os = "macos")]
+    cmd.env("TAILSCALE_BE_CLI", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -212,6 +229,20 @@ fn tailscale_status() -> io::Result<std::process::Output> {
         cmd.creation_flags(0x08000000);
     }
     cmd.output()
+}
+
+fn json_object(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(start) = trimmed.find('{') else {
+        return "";
+    };
+    let Some(end) = trimmed.rfind('}') else {
+        return "";
+    };
+    if end < start {
+        return "";
+    }
+    &trimmed[start..=end]
 }
 
 /// Read peers from `tailscale status --json` (R-NET-4, R-NET-5).
@@ -226,8 +257,12 @@ pub fn read_status() -> Result<Status, NetError> {
     if !output.status.success() {
         return Err(NetError::TailscaleNotRunning);
     }
-    let json = String::from_utf8_lossy(&output.stdout);
-    parse_status_json(&json).map_err(NetError::Json)
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let json = json_object(&raw);
+    if json.is_empty() {
+        return Err(NetError::NoJson);
+    }
+    parse_status_json(json).map_err(NetError::Json)
 }
 
 #[cfg(test)]
@@ -289,9 +324,20 @@ mod tests {
         assert!(peers.iter().any(|p| p.this_machine && p.hostname == "win1"));
         let mac = peers.iter().find(|p| p.hostname == "mac").unwrap();
         assert!(!mac.this_machine);
+        assert_eq!(mac.os, "Mac OS");
         assert_eq!(mac.ips, vec![Ipv4Addr::new(100, 64, 9, 9)]);
         assert_eq!(mac.dns_name, "mac.tailnet.ts.net");
         assert_eq!(connect_ip(mac), Some(Ipv4Addr::new(100, 64, 9, 9)));
+        let me = peers.iter().find(|p| p.this_machine).unwrap();
+        assert_eq!(me.os, "Windows");
+    }
+
+    #[test]
+    fn json_object_drops_a_prefix() {
+        let text = "Tailscale GUI\n{\"BackendState\":\"Running\",\"Peer\":null}";
+        let status = parse_status_json(json_object(text)).unwrap();
+        assert_eq!(status.backend_state, "Running");
+        assert!(json_object("").is_empty());
     }
 
     #[test]

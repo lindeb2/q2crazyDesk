@@ -41,8 +41,11 @@ pub fn refresh() {
             store_peers(&status.peers);
         }
         Err(err) => {
+            let down = matches!(err, q2_net::NetError::TailscaleNotRunning);
             LocalConfig::set_flutter_option(NET_ERROR_KEY.to_owned(), err.to_string());
-            mark_tailscale_offline();
+            if down {
+                mark_tailscale_offline();
+            }
             notify();
         }
     }
@@ -110,7 +113,7 @@ fn refresh_due() -> bool {
     true
 }
 
-fn is_tailscale_peer_id(id: &str) -> bool {
+pub(crate) fn is_tailscale_peer_id(id: &str) -> bool {
     id.parse::<Ipv4Addr>()
         .map(q2_net::is_tailscale_ip)
         .unwrap_or(false)
