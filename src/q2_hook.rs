@@ -14,6 +14,7 @@ use std::ptr::null_mut;
 use std::sync::Mutex;
 use std::thread;
 
+use hbb_common::log;
 use q2_router::{Button, Input};
 
 use winapi::{

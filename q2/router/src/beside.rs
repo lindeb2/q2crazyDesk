@@ -20,15 +20,21 @@ use q2_layout::{
 };
 
 use crate::capture::{Capture, Motion};
+use crate::hotkey::{is_modifier, Hotkey, CTRL};
+use crate::Guards;
 
 const LOCAL: &str = "local";
 /// Until the peer reports a physical size, its display is assumed to be 96 dpi.
 const MM_PER_PX: f64 = 25.4 / 96.0;
 
-const VK_ESCAPE: u32 = 0x1B;
-const CTRL: [u32; 3] = [0x11, 0xA2, 0xA3];
-const ALT: [u32; 3] = [0x12, 0xA4, 0xA5];
-const SHIFT: [u32; 3] = [0x10, 0xA0, 0xA1];
+/// Ctrl+Alt+Shift+Esc: the way out when control is stuck on a peer (R-INPUT-5).
+const HOME_HOTKEY: Hotkey = Hotkey {
+    ctrl: true,
+    alt: true,
+    shift: true,
+    win: false,
+    vk: 0x1B,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Button {
@@ -96,6 +102,9 @@ struct Captured {
     center: (i32, i32),
     keys: BTreeSet<(u32, u32, bool)>,
     buttons: BTreeSet<Button>,
+    /// Keys that were already down on this computer when the capture began.
+    /// Their release is not hidden from this computer.
+    pre_held: BTreeSet<u32>,
 }
 
 enum State {
@@ -109,6 +118,15 @@ pub struct Beside {
     ready: bool,
     canvas: Canvas,
     state: State,
+    guards: Guards,
+    home: Hotkey,
+    jump: Option<Hotkey>,
+    fullscreen_app: Option<String>,
+    /// Physical keys that are down on this computer, as seen while not captured.
+    held_local: BTreeSet<(u32, u32, bool)>,
+    last_pos: (i32, i32),
+    /// Keys of a shortcut that was acted on. Their repeats and release are hidden.
+    swallow_up: BTreeSet<u32>,
 }
 
 impl Default for Beside {
@@ -125,6 +143,13 @@ impl Beside {
             ready: false,
             canvas: Canvas::new(),
             state: State::Local,
+            guards: Guards::default(),
+            home: HOME_HOTKEY,
+            jump: None,
+            fullscreen_app: None,
+            held_local: BTreeSet::new(),
+            last_pos: (0, 0),
+            swallow_up: BTreeSet::new(),
         }
     }
 
@@ -142,6 +167,23 @@ impl Beside {
     pub fn set_target(&mut self, target: Option<Target>) {
         self.target = target;
         self.rebuild();
+    }
+
+    /// Switch guards (R-INPUT-4). `require_modifier` means Ctrl must be held.
+    pub fn set_guards(&mut self, guards: Guards) {
+        self.guards = guards;
+    }
+
+    /// `home` returns control to this computer; `jump` takes it to the peer,
+    /// at the centre of the peer's display (R-INPUT-5).
+    pub fn set_hotkeys(&mut self, home: Option<Hotkey>, jump: Option<Hotkey>) {
+        self.home = home.unwrap_or(HOME_HOTKEY);
+        self.jump = jump;
+    }
+
+    /// The executable name of the foreground app when it is fullscreen.
+    pub fn set_fullscreen_app(&mut self, app: Option<String>) {
+        self.fullscreen_app = app;
     }
 
     /// Only a peer whose session is logged in can capture input.
@@ -205,9 +247,124 @@ impl Beside {
     }
 
     fn local_input(&mut self, input: Input) -> Step {
-        let Input::Move { x, y } = input else {
-            return Step::default();
+        match input {
+            Input::Move { x, y } => {
+                self.last_pos = (x, y);
+                self.edge_input(x, y)
+            }
+            Input::Key {
+                vk,
+                scan,
+                extended,
+                down,
+            } => self.local_key(vk, scan, extended, down),
+            _ => Step::default(),
+        }
+    }
+
+    fn held_vks(&self) -> BTreeSet<u32> {
+        self.held_local.iter().map(|(vk, _, _)| *vk).collect()
+    }
+
+    fn local_key(&mut self, vk: u32, scan: u32, extended: bool, down: bool) -> Step {
+        if !down {
+            self.held_local.remove(&(vk, scan, extended));
+            let hidden = self.swallow_up.remove(&vk);
+            return Step {
+                swallow: hidden,
+                out: Vec::new(),
+            };
+        }
+        self.held_local.insert((vk, scan, extended));
+        if self.swallow_up.contains(&vk) {
+            return Step {
+                swallow: true,
+                out: Vec::new(),
+            };
+        }
+        let held = self.held_vks();
+        let jump = self.jump.is_some_and(|h| h.matches(vk, &held));
+        if jump && self.ready {
+            if let Some(step) = self.jump_capture() {
+                self.swallow_up.insert(vk);
+                return step;
+            }
+        }
+        Step::default()
+    }
+
+    /// Take control to the peer without crossing an edge.
+    fn jump_capture(&mut self) -> Option<Step> {
+        let target = self.target.clone()?;
+        let (x, y) = self.last_pos;
+        let panel = self
+            .panels
+            .iter()
+            .find(|p| x >= p.x && x < p.x + p.width as i32 && y >= p.y && y < p.y + p.height as i32)
+            .or_else(|| self.panels.first())?;
+        let center = (
+            panel.x + panel.width as i32 / 2,
+            panel.y + panel.height as i32 / 2,
+        );
+        let entry = (target.size_px.0 / 2, target.size_px.1 / 2);
+        // The peer sits to the right, so its way back is its left edge.
+        let capture = Capture::enter(target.size_px, entry, Edge::Left);
+        let (ex, ey) = capture.position();
+        self.state = State::Captured(Captured {
+            peer: target.peer.clone(),
+            monitor: target_id(&target.peer),
+            capture,
+            center,
+            keys: BTreeSet::new(),
+            buttons: BTreeSet::new(),
+            pre_held: self.held_vks(),
+        });
+        Some(Step {
+            swallow: true,
+            out: vec![
+                Out::Warp {
+                    x: center.0,
+                    y: center.1,
+                },
+                Out::Enter {
+                    peer: target.peer,
+                    x: ex,
+                    y: ey,
+                },
+            ],
+        })
+    }
+
+    fn edge_blocked(&self, heading: Edge, on_edge: (f64, f64), size: SizeMm) -> bool {
+        let g = &self.guards;
+        let (along, length) = match heading {
+            Edge::Left | Edge::Right => (on_edge.1, size.height),
+            Edge::Top | Edge::Bottom => (on_edge.0, size.width),
         };
+        if g.corner_dead_zone_mm > 0.0
+            && (along < g.corner_dead_zone_mm || along > length - g.corner_dead_zone_mm)
+        {
+            return true;
+        }
+        if g.require_modifier && !self.held_vks().iter().any(|vk| CTRL.contains(vk)) {
+            return true;
+        }
+        if g.block_fullscreen {
+            if let Some(app) = &self.fullscreen_app {
+                let app = app.to_lowercase();
+                let ignored = g
+                    .fullscreen_ignore
+                    .iter()
+                    .any(|name| name.trim().to_lowercase() == app);
+                if !ignored {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn edge_input(&mut self, x: i32, y: i32) -> Step {
         if !self.ready {
             return Step::default();
         }
@@ -247,6 +404,9 @@ impl Beside {
             if hit.dest_monitor != target_id(&target.peer) {
                 continue;
             }
+            if self.edge_blocked(heading, on_edge, size) {
+                return Step::default();
+            }
             let entry = (hit.dest_px.0.round() as i32, hit.dest_px.1.round() as i32);
             let capture = Capture::enter(target.size_px, entry, heading.opposite());
             let (ex, ey) = capture.position();
@@ -254,28 +414,40 @@ impl Beside {
                 panel.x + panel.width as i32 / 2,
                 panel.y + panel.height as i32 / 2,
             );
-            self.state = State::Captured(Captured {
+            let mut captured = Captured {
                 peer: target.peer.clone(),
                 monitor: hit.dest_monitor,
                 capture,
                 center,
                 keys: BTreeSet::new(),
                 buttons: BTreeSet::new(),
-            });
-            return Step {
-                swallow: true,
-                out: vec![
-                    Out::Warp {
-                        x: center.0,
-                        y: center.1,
-                    },
-                    Out::Enter {
-                        peer: target.peer,
-                        x: ex,
-                        y: ey,
-                    },
-                ],
+                pre_held: self.held_vks(),
             };
+            let mut out = vec![
+                Out::Warp {
+                    x: center.0,
+                    y: center.1,
+                },
+                Out::Enter {
+                    peer: target.peer,
+                    x: ex,
+                    y: ey,
+                },
+            ];
+            // Modifiers held on this computer keep working on the peer.
+            for &(vk, scan, extended) in &self.held_local {
+                if is_modifier(vk) {
+                    captured.keys.insert((vk, scan, extended));
+                    out.push(Out::Key {
+                        vk,
+                        scan,
+                        extended,
+                        down: true,
+                    });
+                }
+            }
+            self.state = State::Captured(captured);
+            return Step { swallow: true, out };
         }
         Step::default()
     }
@@ -320,26 +492,51 @@ impl Beside {
                 extended,
                 down,
             } => {
-                if down && vk == VK_ESCAPE && rescue_held(&c.keys) {
+                let mut held: BTreeSet<u32> = c.keys.iter().map(|(vk, _, _)| *vk).collect();
+                held.extend(c.pre_held.iter().copied());
+                if down && self.home.matches(vk, &held) {
                     let warp = Out::Warp {
                         x: c.center.0,
                         y: c.center.1,
                     };
                     let mut out = leave_outs(c);
                     out.push(warp);
+                    self.swallow_up.insert(vk);
                     return Step { swallow: true, out };
                 }
-                if down {
-                    c.keys.insert((vk, scan, extended));
+                if self.swallow_up.contains(&vk) {
+                    // A shortcut that was acted on: hide its repeats and release.
+                    if !down {
+                        self.swallow_up.remove(&vk);
+                        c.pre_held.remove(&vk);
+                        self.held_local.retain(|(held_vk, _, _)| *held_vk != vk);
+                    }
+                } else if !down && c.pre_held.remove(&vk) {
+                    // Pressed before the capture: this computer needs the release.
+                    self.held_local.retain(|(held_vk, _, _)| *held_vk != vk);
+                    if c.keys.remove(&(vk, scan, extended)) {
+                        out.push(Out::Key {
+                            vk,
+                            scan,
+                            extended,
+                            down: false,
+                        });
+                    }
+                    self.state = State::Captured(c);
+                    return Step { swallow: false, out };
                 } else {
-                    c.keys.remove(&(vk, scan, extended));
+                    if down {
+                        c.keys.insert((vk, scan, extended));
+                    } else {
+                        c.keys.remove(&(vk, scan, extended));
+                    }
+                    out.push(Out::Key {
+                        vk,
+                        scan,
+                        extended,
+                        down,
+                    });
                 }
-                out.push(Out::Key {
-                    vk,
-                    scan,
-                    extended,
-                    down,
-                });
             }
         }
         self.state = State::Captured(c);
@@ -392,11 +589,6 @@ fn target_id(peer: &str) -> MonitorId {
     }
 }
 
-fn rescue_held(keys: &BTreeSet<(u32, u32, bool)>) -> bool {
-    let held = |group: &[u32; 3]| keys.iter().any(|(vk, _, _)| group.contains(vk));
-    held(&CTRL) && held(&ALT) && held(&SHIFT)
-}
-
 /// Release everything that is held on the target, then say control is back.
 fn leave_outs(c: Captured) -> Vec<Out> {
     let mut out = Vec::new();
@@ -421,6 +613,7 @@ fn leave_outs(c: Captured) -> Vec<Out> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Guards;
 
     const PEER: &str = "100.64.0.2";
 
@@ -629,7 +822,7 @@ mod tests {
             });
         }
         let step = b.handle(Input::Key {
-            vk: VK_ESCAPE,
+            vk: 0x1B,
             scan: 1,
             extended: false,
             down: true,
@@ -658,5 +851,185 @@ mod tests {
             .iter()
             .any(|o| matches!(o, Out::Leave { peer } if peer == PEER)));
         assert!(b.release().is_empty());
+    }
+
+    fn key(vk: u32, down: bool) -> Input {
+        Input::Key {
+            vk,
+            scan: vk,
+            extended: false,
+            down,
+        }
+    }
+
+    fn guarded(guards: Guards) -> Beside {
+        let mut b = ready();
+        b.set_guards(guards);
+        b
+    }
+
+    #[test]
+    fn corner_dead_zone_blocks_near_the_corner_only() {
+        let guards = Guards {
+            corner_dead_zone_mm: 20.0,
+            ..Guards::default()
+        };
+        // 1080 px is 285.75 mm: 20 mm is about 76 px at 3.78 px/mm.
+        let mut b = guarded(guards.clone());
+        assert_eq!(b.handle(Input::Move { x: 1919, y: 30 }), Step::default());
+        assert_eq!(b.handle(Input::Move { x: 1919, y: 1060 }), Step::default());
+        assert!(!b.is_captured());
+        let mut b = guarded(guards);
+        assert!(b.handle(Input::Move { x: 1919, y: 540 }).swallow);
+    }
+
+    #[test]
+    fn require_modifier_needs_ctrl_held_and_hands_it_to_the_peer() {
+        let guards = Guards {
+            require_modifier: true,
+            ..Guards::default()
+        };
+        let mut b = guarded(guards);
+        assert_eq!(b.handle(Input::Move { x: 1919, y: 540 }), Step::default());
+        assert_eq!(b.handle(key(0xA2, true)), Step::default());
+        let step = b.handle(Input::Move { x: 1919, y: 540 });
+        assert!(step.swallow);
+        assert!(step.out.contains(&Out::Key {
+            vk: 0xA2,
+            scan: 0xA2,
+            extended: false,
+            down: true
+        }));
+        // Releasing Ctrl later reaches this computer and releases it on the peer.
+        let up = b.handle(key(0xA2, false));
+        assert!(!up.swallow);
+        assert_eq!(
+            up.out,
+            vec![Out::Key {
+                vk: 0xA2,
+                scan: 0xA2,
+                extended: false,
+                down: false
+            }]
+        );
+    }
+
+    #[test]
+    fn fullscreen_guard_blocks_unless_the_app_is_ignored() {
+        let guards = Guards {
+            block_fullscreen: true,
+            fullscreen_ignore: ["Vlc.exe".to_owned()].into_iter().collect(),
+            ..Guards::default()
+        };
+        let mut b = guarded(guards.clone());
+        b.set_fullscreen_app(Some("game.exe".to_owned()));
+        assert_eq!(b.handle(Input::Move { x: 1919, y: 540 }), Step::default());
+        b.set_fullscreen_app(Some("VLC.EXE".to_owned()));
+        assert!(b.handle(Input::Move { x: 1919, y: 540 }).swallow);
+        let mut b = guarded(guards);
+        b.set_fullscreen_app(None);
+        assert!(b.handle(Input::Move { x: 1919, y: 540 }).swallow);
+    }
+
+    #[test]
+    fn jump_hotkey_takes_control_to_the_peer_centre_and_hides_the_key() {
+        let mut b = ready();
+        b.set_hotkeys(None, Hotkey::parse("ctrl+alt+f1"));
+        b.handle(Input::Move { x: 300, y: 300 });
+        b.handle(key(0xA2, true));
+        b.handle(key(0xA4, true));
+        let step = b.handle(key(0x70, true));
+        assert!(step.swallow);
+        assert!(b.is_captured());
+        assert_eq!(step.out[0], Out::Warp { x: 960, y: 540 });
+        assert_eq!(
+            step.out[1],
+            Out::Enter {
+                peer: PEER.to_owned(),
+                x: 960,
+                y: 540
+            }
+        );
+        // Key repeat and release of the shortcut are hidden and not forwarded.
+        let repeat = b.handle(key(0x70, true));
+        assert_eq!(
+            repeat,
+            Step {
+                swallow: true,
+                out: vec![]
+            }
+        );
+        let up = b.handle(key(0x70, false));
+        assert_eq!(
+            up,
+            Step {
+                swallow: true,
+                out: vec![]
+            }
+        );
+        // The modifiers were held before: their release is left to this computer.
+        let ctrl_up = b.handle(key(0xA2, false));
+        assert_eq!(
+            ctrl_up,
+            Step {
+                swallow: false,
+                out: vec![]
+            }
+        );
+    }
+
+    #[test]
+    fn jump_hotkey_needs_a_ready_peer_and_the_exact_modifiers() {
+        let mut b = ready();
+        b.set_hotkeys(None, Hotkey::parse("ctrl+alt+f1"));
+        b.handle(key(0xA2, true));
+        assert_eq!(b.handle(key(0x70, true)), Step::default());
+        assert!(!b.is_captured());
+        let mut b = ready();
+        b.set_hotkeys(None, Hotkey::parse("ctrl+alt+f1"));
+        b.set_ready(false);
+        b.handle(key(0xA2, true));
+        b.handle(key(0xA4, true));
+        assert_eq!(b.handle(key(0x70, true)), Step::default());
+    }
+
+    #[test]
+    fn a_configured_home_hotkey_replaces_the_default() {
+        let mut b = ready();
+        b.set_hotkeys(Hotkey::parse("ctrl+f12"), None);
+        b.handle(Input::Move { x: 1919, y: 540 });
+        for vk in [0xA2u32, 0xA4, 0xA0] {
+            b.handle(key(vk, true));
+        }
+        assert!(b
+            .handle(key(0x1B, true))
+            .out
+            .iter()
+            .any(|o| matches!(o, Out::Key { vk: 0x1B, .. })));
+        assert!(b.is_captured());
+        let mut b = ready();
+        b.set_hotkeys(Hotkey::parse("ctrl+f12"), None);
+        b.handle(Input::Move { x: 1919, y: 540 });
+        b.handle(key(0xA2, true));
+        let step = b.handle(key(0x7B, true));
+        assert!(!b.is_captured());
+        assert!(step.out.iter().any(|o| matches!(o, Out::Leave { .. })));
+    }
+
+    #[test]
+    fn keys_held_before_capture_are_released_locally_not_swallowed() {
+        let mut b = ready();
+        b.handle(key(0x41, true));
+        let step = b.handle(Input::Move { x: 1919, y: 540 });
+        // A plain letter is not handed to the peer.
+        assert!(!step.out.iter().any(|o| matches!(o, Out::Key { .. })));
+        let up = b.handle(key(0x41, false));
+        assert_eq!(
+            up,
+            Step {
+                swallow: false,
+                out: vec![]
+            }
+        );
     }
 }

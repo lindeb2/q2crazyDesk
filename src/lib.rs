@@ -79,6 +79,12 @@ mod q2_beside;
     feature = "flutter",
     not(any(target_os = "android", target_os = "ios"))
 ))]
+mod q2_fullscreen;
+#[cfg(all(
+    windows,
+    feature = "flutter",
+    not(any(target_os = "android", target_os = "ios"))
+))]
 mod q2_hook;
 mod q2_init;
 mod q2_local;

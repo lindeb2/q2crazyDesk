@@ -6,11 +6,13 @@
 
 mod beside;
 mod capture;
+mod hotkey;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use beside::{Beside, Button, Input, Out, Step, Target};
 pub use capture::{Capture, Motion};
+pub use hotkey::Hotkey;
 
 use q2_keys::Key;
 use q2_layout::{try_cross, Canvas, Crossing, DeviceId, Edge, MonitorId, EDGE_EPS_MM};

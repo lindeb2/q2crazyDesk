@@ -198,8 +198,11 @@ pub fn start() {
 mod control {
     use std::time::{Duration, Instant};
 
-    use hbb_common::{config::LanPeers, log};
-    use q2_router::Target;
+    use hbb_common::{
+        config::{Config, LanPeers},
+        log,
+    };
+    use q2_router::{Guards, Hotkey, Target};
 
     use super::imp::{execute, with_beside};
     use crate::q2_session;
@@ -214,6 +217,49 @@ mod control {
         size: (i32, i32),
         ready: bool,
         since: Instant,
+    }
+
+    fn flag(key: &str) -> bool {
+        Config::get_option(key) == "Y"
+    }
+
+    /// Read the guard and hotkey options and hand them to the state machine.
+    /// Returns whether the fullscreen guard is on, so the caller knows whether
+    /// to look at the foreground window.
+    ///
+    /// Options (no settings screen yet): `q2-corner-dead-zone-mm`,
+    /// `q2-require-modifier` (Y: hold Ctrl to cross), `q2-block-fullscreen` (Y),
+    /// `q2-fullscreen-ignore` (comma-separated executable names),
+    /// `q2-hotkey-home` and `q2-hotkey-peer` (for example `ctrl+alt+f1`).
+    pub(super) fn apply_settings() -> bool {
+        let dead_zone = Config::get_option("q2-corner-dead-zone-mm")
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|mm| mm.is_finite() && *mm >= 0.0)
+            .unwrap_or(0.0);
+        let ignore = Config::get_option("q2-fullscreen-ignore")
+            .split(',')
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        let guards = Guards {
+            corner_dead_zone_mm: dead_zone,
+            require_modifier: flag("q2-require-modifier"),
+            block_fullscreen: flag("q2-block-fullscreen"),
+            fullscreen_ignore: ignore,
+        };
+        let home = Hotkey::parse(&Config::get_option("q2-hotkey-home"));
+        let jump = Hotkey::parse(&Config::get_option("q2-hotkey-peer"));
+        let block_fullscreen = guards.block_fullscreen;
+        with_beside(|b| {
+            b.set_guards(guards);
+            b.set_hotkeys(home, jump);
+            if !block_fullscreen {
+                b.set_fullscreen_app(None);
+            }
+        });
+        block_fullscreen
     }
 
     /// The first paired Tailscale peer that is online.
@@ -310,7 +356,7 @@ mod windows {
 
     use hbb_common::log;
 
-    use super::control::{drive, Link, TICK};
+    use super::control::{apply_settings, drive, Link, TICK};
     use super::imp::{execute, with_beside};
 
     pub fn start() {
@@ -349,6 +395,11 @@ mod windows {
             if now != panels {
                 panels = now.clone();
                 with_beside(|b| b.set_local_panels(now));
+            }
+            let block_fullscreen = apply_settings();
+            if block_fullscreen {
+                let app = crate::q2_fullscreen::foreground_fullscreen_app();
+                with_beside(|b| b.set_fullscreen_app(app));
             }
             drive(&mut link);
         }
