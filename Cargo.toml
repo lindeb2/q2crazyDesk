@@ -57,6 +57,7 @@ base = { path = "libs/base" }
 q2-net = { path = "q2/net" }
 q2-layout = { path = "q2/layout" }
 q2-router = { path = "q2/router" }
+q2-sync = { path = "q2/sync" }
 serde_derive = "1.0"
 serde = "1.0"
 serde_json = "1.0"

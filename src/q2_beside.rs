@@ -196,13 +196,18 @@ pub fn start() {
 /// is usable. Not Windows-specific, so it is also compiled and checked on Linux.
 #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
 mod control {
+    use std::net::{IpAddr, SocketAddr};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use hbb_common::{
         config::{Config, LanPeers},
         log,
     };
-    use q2_router::{Guards, Hotkey, Target};
+    use q2_layout::OsPanel;
+    use q2_router::{physical_size_of, Guards, Hotkey, Target};
 
     use super::imp::{execute, with_beside};
     use crate::q2_session;
@@ -211,12 +216,73 @@ mod control {
     /// A session that stays unusable this long is closed and opened again.
     const STALE: Duration = Duration::from_secs(30);
     const DEFAULT_SIZE: (i32, i32) = (1920, 1080);
+    /// Ask the peer for its monitor sizes again this often once they are known,
+    /// and this often while they are not.
+    const MM_REFRESH: Duration = Duration::from_secs(120);
+    const MM_RETRY: Duration = Duration::from_secs(15);
+    const MM_TIMEOUT: Duration = Duration::from_secs(2);
 
     pub(super) struct Link {
         peer: String,
         size: (i32, i32),
+        size_mm: Option<(f64, f64)>,
         ready: bool,
         since: Instant,
+        asked_at: Option<Instant>,
+        asking: Arc<AtomicBool>,
+        answer: Arc<Mutex<Option<Vec<OsPanel>>>>,
+    }
+
+    impl Link {
+        fn new(peer: String) -> Self {
+            Link {
+                peer,
+                size: DEFAULT_SIZE,
+                size_mm: None,
+                ready: false,
+                since: Instant::now(),
+                asked_at: None,
+                asking: Arc::new(AtomicBool::new(false)),
+                answer: Arc::new(Mutex::new(None)),
+            }
+        }
+    }
+
+    /// Learn the peer's physical monitor size from its q2 service, without
+    /// holding up the control loop.
+    fn poll_monitors(l: &mut Link) {
+        if let Some(panels) = l.answer.lock().ok().and_then(|mut slot| slot.take()) {
+            l.size_mm = physical_size_of(&panels, l.size).or(l.size_mm);
+        }
+        let wait = if l.size_mm.is_some() {
+            MM_REFRESH
+        } else {
+            MM_RETRY
+        };
+        let due = l.asked_at.map_or(true, |at| at.elapsed() > wait);
+        if !due || l.asking.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        l.asked_at = Some(Instant::now());
+        let Ok(ip) = l.peer.parse::<IpAddr>() else {
+            l.asking.store(false, Ordering::SeqCst);
+            return;
+        };
+        let answer = l.answer.clone();
+        let asking = l.asking.clone();
+        let addr = SocketAddr::new(ip, q2_sync::service::PORT);
+        let spawned = thread::Builder::new()
+            .name("q2-ask-monitors".to_owned())
+            .spawn(move || {
+                let panels = q2_sync::service::fetch_monitors(addr, MM_TIMEOUT).unwrap_or_default();
+                if let Ok(mut slot) = answer.lock() {
+                    *slot = Some(panels);
+                }
+                asking.store(false, Ordering::SeqCst);
+            });
+        if spawned.is_err() {
+            l.asking.store(false, Ordering::SeqCst);
+        }
     }
 
     fn flag(key: &str) -> bool {
@@ -301,14 +367,7 @@ mod control {
             }
             if let Some(peer) = wanted {
                 match q2_session::connect(&peer) {
-                    Ok(_) => {
-                        *link = Some(Link {
-                            peer,
-                            size: DEFAULT_SIZE,
-                            ready: false,
-                            since: Instant::now(),
-                        })
-                    }
+                    Ok(_) => *link = Some(Link::new(peer)),
                     Err(err) => log::warn!("q2 beside: could not open a session to {peer}: {err}"),
                 }
             }
@@ -321,6 +380,7 @@ mod control {
             if let Some(size) = display_size(&l.peer) {
                 l.size = size;
             }
+            poll_monitors(l);
         }
         if ready != l.ready {
             l.ready = ready;
@@ -336,6 +396,7 @@ mod control {
         let target = Target {
             peer: l.peer.clone(),
             size_px: l.size,
+            size_mm: l.size_mm,
         };
         if let Some(outs) = with_beside(|b| {
             b.set_target(Some(target));

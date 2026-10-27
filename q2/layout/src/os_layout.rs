@@ -7,7 +7,7 @@
 use crate::{auto_link, try_cross, Canvas, DeviceId, Edge, Monitor, MonitorId, SizeMm, SizePx, EDGE_EPS_MM};
 
 /// One monitor as the OS reports it, in the same pixel space as the cursor.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OsPanel {
     pub index: u32,
     pub x: i32,

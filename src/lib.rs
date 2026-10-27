@@ -89,5 +89,6 @@ mod q2_hook;
 mod q2_init;
 mod q2_local;
 mod q2_peers;
+mod q2_service;
 #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
 mod q2_session;

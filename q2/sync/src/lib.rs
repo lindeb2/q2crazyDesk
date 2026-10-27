@@ -1,5 +1,7 @@
 //! Last-writer-wins documents for layout, profiles, and settings (R-LAYOUT-7).
 
+pub mod service;
+
 use q2_layout::DeviceId;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 

@@ -10,7 +10,7 @@ mod hotkey;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use beside::{Beside, Button, Input, Out, Step, Target};
+pub use beside::{physical_size_of, Beside, Button, Input, Out, Step, Target};
 pub use capture::{Capture, Motion};
 pub use hotkey::Hotkey;
 

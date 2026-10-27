@@ -6439,6 +6439,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "q2-sync"
+version = "0.1.0"
+dependencies = [
+ "q2-layout",
+ "serde 1.0.228",
+ "serde_json 1.0.118",
+]
+
+[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7186,6 +7195,7 @@ dependencies = [
  "q2-layout",
  "q2-net",
  "q2-router",
+ "q2-sync",
  "qrcode-generator",
  "rdev",
  "remote_printer",

@@ -89,10 +89,13 @@ pub struct Step {
     pub out: Vec<Out>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Target {
     pub peer: String,
     pub size_px: (i32, i32),
+    /// The peer's real physical size. `None` until it has told us, and then
+    /// the display is assumed to be 96 dpi.
+    pub size_mm: Option<(f64, f64)>,
 }
 
 struct Captured {
@@ -230,9 +233,14 @@ impl Beside {
             canvas.monitors.push(Monitor {
                 id: target_id(&target.peer),
                 origin_mm: (rect.right(), rect.y),
-                physical_mm: SizeMm {
-                    width: w as f64 * MM_PER_PX,
-                    height: h as f64 * MM_PER_PX,
+                physical_mm: match target.size_mm {
+                    Some((width, height)) if width > 0.0 && height > 0.0 => {
+                        SizeMm { width, height }
+                    }
+                    _ => SizeMm {
+                        width: w as f64 * MM_PER_PX,
+                        height: h as f64 * MM_PER_PX,
+                    },
                 },
                 pixels: SizePx {
                     width: w as u32,
@@ -582,6 +590,24 @@ impl Beside {
     }
 }
 
+/// The physical size of the peer's display that has `size_px` pixels, out of
+/// the monitors the peer reported. Prefers the one at the origin, which is the
+/// display the session shows. `None` when nothing matches or a size is missing.
+pub fn physical_size_of(panels: &[OsPanel], size_px: (i32, i32)) -> Option<(f64, f64)> {
+    let same_size = |p: &&OsPanel| {
+        p.width as i32 == size_px.0
+            && p.height as i32 == size_px.1
+            && p.width_mm > 0.0
+            && p.height_mm > 0.0
+    };
+    let found = panels
+        .iter()
+        .filter(same_size)
+        .find(|p| p.x == 0 && p.y == 0)
+        .or_else(|| panels.iter().find(same_size))?;
+    Some((found.width_mm, found.height_mm))
+}
+
 fn target_id(peer: &str) -> MonitorId {
     MonitorId {
         device: DeviceId(peer.to_owned()),
@@ -636,6 +662,7 @@ mod tests {
         b.set_target(Some(Target {
             peer: PEER.to_owned(),
             size_px: (1920, 1080),
+            size_mm: None,
         }));
         b.set_ready(true);
         b
@@ -672,6 +699,7 @@ mod tests {
         b.set_target(Some(Target {
             peer: PEER.to_owned(),
             size_px: (1280, 1440),
+            size_mm: None,
         }));
         b.set_ready(true);
         // 100 mm from the top of the local monitor is 378 px at 3.78 px/mm.
@@ -1031,5 +1059,70 @@ mod tests {
                 out: vec![]
             }
         );
+    }
+
+    #[test]
+    fn a_reported_physical_size_decides_the_landing_height() {
+        // A 27 inch 1440p monitor (597 x 336 mm) next to the 285.75 mm tall one.
+        let mut b = Beside::new();
+        b.set_local_panels(vec![panel()]);
+        b.set_target(Some(Target {
+            peer: PEER.to_owned(),
+            size_px: (2560, 1440),
+            size_mm: Some((597.0, 336.0)),
+        }));
+        b.set_ready(true);
+        // 100 mm below the top of the local monitor is 100 mm below the top of
+        // the peer: 100 / 336 * 1440 = 428.6 px.
+        let step = b.handle(Input::Move { x: 1919, y: 378 });
+        match &step.out[1] {
+            Out::Enter { y, .. } => assert!((*y - 429).abs() <= 3, "y was {y}"),
+            other => panic!("expected Enter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_reported_monitor_with_the_matching_pixels_gives_the_size() {
+        let a = OsPanel {
+            index: 0,
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            width_mm: 597.0,
+            height_mm: 336.0,
+            scale: 1.0,
+        };
+        let b = OsPanel {
+            index: 1,
+            x: 2560,
+            width_mm: 521.0,
+            height_mm: 293.0,
+            width: 1920,
+            height: 1080,
+            ..a.clone()
+        };
+        let c = OsPanel {
+            index: 2,
+            x: 0,
+            width_mm: 400.0,
+            height_mm: 225.0,
+            width: 1920,
+            height: 1080,
+            ..a.clone()
+        };
+        let all = [a.clone(), b.clone()];
+        assert_eq!(physical_size_of(&all, (2560, 1440)), Some((597.0, 336.0)));
+        assert_eq!(physical_size_of(&all, (1920, 1080)), Some((521.0, 293.0)));
+        assert_eq!(physical_size_of(&all, (800, 600)), None);
+        // Two with the same pixels: the one at the origin wins.
+        let both = [b.clone(), c.clone()];
+        assert_eq!(physical_size_of(&both, (1920, 1080)), Some((400.0, 225.0)));
+        // A monitor that reports no size is not used.
+        let blind = OsPanel {
+            width_mm: 0.0,
+            ..a
+        };
+        assert_eq!(physical_size_of(&[blind], (2560, 1440)), None);
     }
 }
