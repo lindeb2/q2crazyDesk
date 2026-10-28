@@ -119,7 +119,16 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Why not the RustDesk session:** a chat-message tunnel would need patches in `server/connection.rs` and `client/io_loop.rs`, both upstream files that change often, and it only works while a session is up. The separate service works before any session exists and is tested on its own (4 tests over loopback).
 - **Where it runs:** in the main window and in the `--server` process, whichever binds the port first. Not in the Windows service (session 0 has no monitors). A device that is at the login screen, or whose user has not signed in, does not answer yet; its peer then assumes 96 dpi and asks again every 15 s until it gets an answer, and refreshes every 2 minutes after that.
 - **Matching:** the controller picks the reported monitor with the same pixel size as the display the session shows, preferring the one at the origin (`physical_size_of`).
-- **Not done yet:** macOS and Linux peers answer with an empty list (no `CGDisplayScreenSize` code yet), so they stay at 96 dpi; a manual override per monitor (R-LAYOUT-2) waits for the canvas editor.
+- **macOS:** answers from `CGDisplay` (`CGDisplayScreenSize`, which macOS fills from EDID). The pixel size may be in points on a Retina display where the session counts pixels, so when no monitor matches exactly, the monitor at the origin with the same width-to-height ratio (within 0.5 %) is used. This is checked to compile for `aarch64-apple-darwin`, not run on a Mac.
+- **Not done yet:** Linux peers answer with an empty list and stay at 96 dpi; a manual override per monitor (R-LAYOUT-2) waits for the canvas editor.
+
+### D-016 Typing across operating systems: physical keys, Swedish on both sides (2026-10-26)
+
+- **How keys travel:** `win1` sends physical keys (scan codes) in RustDesk's "map" mode. The peer turns the same physical key into its own key code, so with a Swedish layout on both sides every character is the one printed on the key, including `å ä ö`, dead keys, and AltGr on Windows versus Option on a Swedish Mac (`@` is AltGr+2 on one and Option+2 on the other, and both are the right Alt key).
+- **AltGr:** Windows makes up a left Ctrl (scan code `0x21D`) with every AltGr press. The peer gets AltGr alone, otherwise a Mac would see Control+Option. That Ctrl is hidden, is not sent, and does not count as Ctrl for the Ctrl guard (R-INPUT-4).
+- **Modifiers (R-KEYS-2), Windows controlling a Mac:** Ctrl → Cmd and Win → Control, left stays left and right stays right; Alt stays Alt, which is Option. `q2_keys::remap_windows_key` does it on the physical key and every release matches the mapped key. A Linux peer is treated like Windows.
+- **Not done, and the real risk:** if a peer's keyboard layout is not Swedish, map mode types the Swedish key's position, not its character. RustDesk's "translate" mode sends characters as Unicode and would fix that, but it needs the character for each key press, which `rdev::Keyboard` computes from the system's key state, and that state does not include keys q2 has swallowed. The state would have to be tracked by q2 and fed to `ToUnicodeEx`, including dead keys. It is not built; it needs a peer with a different layout to test against (R-KEYS-3 is only fully met for equal layouts).
+- **Mac controlling Windows** and a user-editable mapping (R-KEYS-1) are not built.
 
 ## Assumptions from section 7
 

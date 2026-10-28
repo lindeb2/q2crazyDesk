@@ -207,7 +207,7 @@ mod control {
         log,
     };
     use q2_layout::OsPanel;
-    use q2_router::{physical_size_of, Guards, Hotkey, Target};
+    use q2_router::{physical_size_of, Guards, Hotkey, OsFamily, Target};
 
     use super::imp::{execute, with_beside};
     use crate::q2_session;
@@ -349,6 +349,16 @@ mod control {
         Some((display.width, display.height))
     }
 
+    /// The peer's operating system, which decides how modifier keys are mapped.
+    /// Linux is treated like Windows: its keys are passed on unchanged.
+    fn peer_os(peer: &str) -> OsFamily {
+        let platform = q2_session::session_for(peer).map(|s| s.peer_platform().to_lowercase());
+        match platform {
+            Some(name) if name.contains("mac") => OsFamily::Macos,
+            _ => OsFamily::Windows,
+        }
+    }
+
     fn forget(peer: &str) {
         if let Some(outs) = with_beside(|b| {
             b.set_target(None);
@@ -397,6 +407,7 @@ mod control {
             peer: l.peer.clone(),
             size_px: l.size,
             size_mm: l.size_mm,
+            os: peer_os(&l.peer),
         };
         if let Some(outs) = with_beside(|b| {
             b.set_target(Some(target));

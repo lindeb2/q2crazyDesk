@@ -19,6 +19,8 @@ use q2_layout::{
     OsPanel, SizeMm, SizePx, DEFAULT_GAP_MM, EDGE_EPS_MM,
 };
 
+use q2_keys::{remap_windows_key, OsFamily, PhysKey, FAKE_ALTGR_CTRL_SCAN};
+
 use crate::capture::{Capture, Motion};
 use crate::hotkey::{is_modifier, Hotkey, CTRL};
 use crate::Guards;
@@ -96,6 +98,8 @@ pub struct Target {
     /// The peer's real physical size. `None` until it has told us, and then
     /// the display is assumed to be 96 dpi.
     pub size_mm: Option<(f64, f64)>,
+    /// The peer's operating system, which decides how modifier keys are mapped.
+    pub os: OsFamily,
 }
 
 struct Captured {
@@ -108,6 +112,8 @@ struct Captured {
     /// Keys that were already down on this computer when the capture began.
     /// Their release is not hidden from this computer.
     pre_held: BTreeSet<u32>,
+    /// The peer's operating system.
+    os: OsFamily,
 }
 
 enum State {
@@ -275,6 +281,9 @@ impl Beside {
     }
 
     fn local_key(&mut self, vk: u32, scan: u32, extended: bool, down: bool) -> Step {
+        if scan == FAKE_ALTGR_CTRL_SCAN {
+            return Step::default();
+        }
         if !down {
             self.held_local.remove(&(vk, scan, extended));
             let hidden = self.swallow_up.remove(&vk);
@@ -326,6 +335,7 @@ impl Beside {
             keys: BTreeSet::new(),
             buttons: BTreeSet::new(),
             pre_held: self.held_vks(),
+            os: target.os,
         });
         Some(Step {
             swallow: true,
@@ -430,6 +440,7 @@ impl Beside {
                 keys: BTreeSet::new(),
                 buttons: BTreeSet::new(),
                 pre_held: self.held_vks(),
+                os: target.os,
             };
             let mut out = vec![
                 Out::Warp {
@@ -446,12 +457,7 @@ impl Beside {
             for &(vk, scan, extended) in &self.held_local {
                 if is_modifier(vk) {
                     captured.keys.insert((vk, scan, extended));
-                    out.push(Out::Key {
-                        vk,
-                        scan,
-                        extended,
-                        down: true,
-                    });
+                    out.push(key_out(target.os, vk, scan, extended, true));
                 }
             }
             self.state = State::Captured(captured);
@@ -500,6 +506,14 @@ impl Beside {
                 extended,
                 down,
             } => {
+                if scan == FAKE_ALTGR_CTRL_SCAN {
+                    // Windows makes up a left Ctrl for AltGr. The peer gets AltGr alone.
+                    self.state = State::Captured(c);
+                    return Step {
+                        swallow: true,
+                        out,
+                    };
+                }
                 let mut held: BTreeSet<u32> = c.keys.iter().map(|(vk, _, _)| *vk).collect();
                 held.extend(c.pre_held.iter().copied());
                 if down && self.home.matches(vk, &held) {
@@ -523,12 +537,7 @@ impl Beside {
                     // Pressed before the capture: this computer needs the release.
                     self.held_local.retain(|(held_vk, _, _)| *held_vk != vk);
                     if c.keys.remove(&(vk, scan, extended)) {
-                        out.push(Out::Key {
-                            vk,
-                            scan,
-                            extended,
-                            down: false,
-                        });
+                        out.push(key_out(c.os, vk, scan, extended, false));
                     }
                     self.state = State::Captured(c);
                     return Step { swallow: false, out };
@@ -538,12 +547,7 @@ impl Beside {
                     } else {
                         c.keys.remove(&(vk, scan, extended));
                     }
-                    out.push(Out::Key {
-                        vk,
-                        scan,
-                        extended,
-                        down,
-                    });
+                    out.push(key_out(c.os, vk, scan, extended, down));
                 }
             }
         }
@@ -592,20 +596,43 @@ impl Beside {
 
 /// The physical size of the peer's display that has `size_px` pixels, out of
 /// the monitors the peer reported. Prefers the one at the origin, which is the
-/// display the session shows. `None` when nothing matches or a size is missing.
+/// display the session shows. When no monitor has exactly those pixels (a
+/// Retina display can count points where the session counts pixels), the one at
+/// the origin with the same shape is used. `None` when nothing fits or a size
+/// is missing.
 pub fn physical_size_of(panels: &[OsPanel], size_px: (i32, i32)) -> Option<(f64, f64)> {
+    let has_size = |p: &&OsPanel| p.width_mm > 0.0 && p.height_mm > 0.0;
     let same_size = |p: &&OsPanel| {
-        p.width as i32 == size_px.0
-            && p.height as i32 == size_px.1
-            && p.width_mm > 0.0
-            && p.height_mm > 0.0
+        has_size(p) && p.width as i32 == size_px.0 && p.height as i32 == size_px.1
     };
-    let found = panels
+    let at_origin = |p: &&OsPanel| p.x == 0 && p.y == 0;
+    let exact = panels
         .iter()
         .filter(same_size)
-        .find(|p| p.x == 0 && p.y == 0)
-        .or_else(|| panels.iter().find(same_size))?;
+        .find(at_origin)
+        .or_else(|| panels.iter().find(same_size));
+    let found = match exact {
+        Some(found) => found,
+        None => {
+            let shape = size_px.0 as f64 / size_px.1.max(1) as f64;
+            panels.iter().filter(has_size).filter(at_origin).find(|p| {
+                let own = p.width as f64 / (p.height.max(1)) as f64;
+                (own - shape).abs() / shape < 0.005
+            })?
+        }
+    };
     Some((found.width_mm, found.height_mm))
+}
+
+/// A key event for the peer, with the modifier mapping of R-KEYS-2 applied.
+fn key_out(os: OsFamily, vk: u32, scan: u32, extended: bool, down: bool) -> Out {
+    let key = remap_windows_key(os, PhysKey { vk, scan, extended });
+    Out::Key {
+        vk: key.vk,
+        scan: key.scan,
+        extended: key.extended,
+        down,
+    }
 }
 
 fn target_id(peer: &str) -> MonitorId {
@@ -619,12 +646,7 @@ fn target_id(peer: &str) -> MonitorId {
 fn leave_outs(c: Captured) -> Vec<Out> {
     let mut out = Vec::new();
     for (vk, scan, extended) in c.keys {
-        out.push(Out::Key {
-            vk,
-            scan,
-            extended,
-            down: false,
-        });
+        out.push(key_out(c.os, vk, scan, extended, false));
     }
     for button in c.buttons {
         out.push(Out::Button {
@@ -663,6 +685,7 @@ mod tests {
             peer: PEER.to_owned(),
             size_px: (1920, 1080),
             size_mm: None,
+            os: OsFamily::Windows,
         }));
         b.set_ready(true);
         b
@@ -700,6 +723,7 @@ mod tests {
             peer: PEER.to_owned(),
             size_px: (1280, 1440),
             size_mm: None,
+            os: OsFamily::Windows,
         }));
         b.set_ready(true);
         // 100 mm from the top of the local monitor is 378 px at 3.78 px/mm.
@@ -1070,6 +1094,7 @@ mod tests {
             peer: PEER.to_owned(),
             size_px: (2560, 1440),
             size_mm: Some((597.0, 336.0)),
+            os: OsFamily::Windows,
         }));
         b.set_ready(true);
         // 100 mm below the top of the local monitor is 100 mm below the top of
@@ -1115,6 +1140,21 @@ mod tests {
         assert_eq!(physical_size_of(&all, (2560, 1440)), Some((597.0, 336.0)));
         assert_eq!(physical_size_of(&all, (1920, 1080)), Some((521.0, 293.0)));
         assert_eq!(physical_size_of(&all, (800, 600)), None);
+        // A Retina display counts points (1440 x 900) where the session counts
+        // pixels (2880 x 1800): same shape at the origin still matches.
+        let retina = OsPanel {
+            width: 1440,
+            height: 900,
+            width_mm: 286.0,
+            height_mm: 179.0,
+            ..a.clone()
+        };
+        assert_eq!(
+            physical_size_of(&[retina.clone()], (2880, 1800)),
+            Some((286.0, 179.0))
+        );
+        // A different shape does not.
+        assert_eq!(physical_size_of(&[retina], (2560, 1440)), None);
         // Two with the same pixels: the one at the origin wins.
         let both = [b.clone(), c.clone()];
         assert_eq!(physical_size_of(&both, (1920, 1080)), Some((400.0, 225.0)));
@@ -1124,5 +1164,146 @@ mod tests {
             ..a
         };
         assert_eq!(physical_size_of(&[blind], (2560, 1440)), None);
+    }
+
+    fn mac_peer() -> Beside {
+        let mut b = Beside::new();
+        b.set_local_panels(vec![panel()]);
+        b.set_target(Some(Target {
+            peer: PEER.to_owned(),
+            size_px: (1920, 1080),
+            size_mm: None,
+            os: OsFamily::Macos,
+        }));
+        b.set_ready(true);
+        b.handle(Input::Move { x: 1919, y: 540 });
+        assert!(b.is_captured());
+        b
+    }
+
+    fn phys(vk: u32, scan: u32, extended: bool, down: bool) -> Input {
+        Input::Key {
+            vk,
+            scan,
+            extended,
+            down,
+        }
+    }
+
+    #[test]
+    fn a_mac_peer_gets_cmd_for_ctrl_and_control_for_win_and_release_matches() {
+        let mut b = mac_peer();
+        let step = b.handle(phys(0xA2, 0x1D, false, true));
+        assert_eq!(
+            step.out,
+            vec![Out::Key {
+                vk: 0x5B,
+                scan: 0x5B,
+                extended: true,
+                down: true
+            }]
+        );
+        let step = b.handle(phys(0x5B, 0x5B, true, true));
+        assert_eq!(
+            step.out,
+            vec![Out::Key {
+                vk: 0xA2,
+                scan: 0x1D,
+                extended: false,
+                down: true
+            }]
+        );
+        // Alt (Option) is passed on unchanged.
+        let step = b.handle(phys(0xA4, 0x38, false, true));
+        assert_eq!(
+            step.out,
+            vec![Out::Key {
+                vk: 0xA4,
+                scan: 0x38,
+                extended: false,
+                down: true
+            }]
+        );
+        // Leaving releases the mapped keys, not the physical ones.
+        let leave = b.release();
+        assert!(leave.contains(&Out::Key {
+            vk: 0x5B,
+            scan: 0x5B,
+            extended: true,
+            down: false
+        }));
+        assert!(leave.contains(&Out::Key {
+            vk: 0xA2,
+            scan: 0x1D,
+            extended: false,
+            down: false
+        }));
+        assert!(!leave.contains(&Out::Key {
+            vk: 0xA2,
+            scan: 0x1D,
+            extended: true,
+            down: false
+        }));
+    }
+
+    #[test]
+    fn a_windows_peer_gets_the_keys_unchanged() {
+        let mut b = captured();
+        let step = b.handle(phys(0xA2, 0x1D, false, true));
+        assert_eq!(
+            step.out,
+            vec![Out::Key {
+                vk: 0xA2,
+                scan: 0x1D,
+                extended: false,
+                down: true
+            }]
+        );
+    }
+
+    #[test]
+    fn the_ctrl_windows_makes_up_for_altgr_is_never_sent() {
+        let mut b = mac_peer();
+        let fake = b.handle(phys(0xA2, 0x21D, false, true));
+        assert_eq!(
+            fake,
+            Step {
+                swallow: true,
+                out: vec![]
+            }
+        );
+        // The right Alt itself (AltGr) reaches the peer as the right Option.
+        let altgr = b.handle(phys(0xA5, 0x38, true, true));
+        assert_eq!(
+            altgr.out,
+            vec![Out::Key {
+                vk: 0xA5,
+                scan: 0x38,
+                extended: true,
+                down: true
+            }]
+        );
+        // Releasing the made-up Ctrl is hidden too, and nothing is left held for it.
+        let fake_up = b.handle(phys(0xA2, 0x21D, false, false));
+        assert_eq!(fake_up.out, vec![]);
+        let leave = b.release();
+        assert_eq!(
+            leave
+                .iter()
+                .filter(|o| matches!(o, Out::Key { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_made_up_ctrl_does_not_count_as_ctrl_for_the_ctrl_guard() {
+        let guards = Guards {
+            require_modifier: true,
+            ..Guards::default()
+        };
+        let mut b = guarded(guards);
+        b.handle(phys(0xA2, 0x21D, false, true));
+        assert_eq!(b.handle(Input::Move { x: 1919, y: 540 }), Step::default());
     }
 }

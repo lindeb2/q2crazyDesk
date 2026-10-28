@@ -138,6 +138,53 @@ pub fn remap_modifiers(controller: OsFamily, target: OsFamily, input: Combo) -> 
     }
 }
 
+/// A physical key as a Windows low-level keyboard hook reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PhysKey {
+    /// Windows virtual-key code, with left and right variants (`VK_LCONTROL`).
+    pub vk: u32,
+    pub scan: u32,
+    pub extended: bool,
+}
+
+const VK_CONTROLS: [u32; 3] = [0x11, 0xA2, 0xA3];
+const VK_LWIN: u32 = 0x5B;
+const VK_RWIN: u32 = 0x5C;
+const VK_LCONTROL: u32 = 0xA2;
+const VK_RCONTROL: u32 = 0xA3;
+
+/// The scan code Windows gives the extra left Ctrl it makes up when AltGr is
+/// pressed. It is never a key the person pressed and is never sent on.
+pub const FAKE_ALTGR_CTRL_SCAN: u32 = 0x21D;
+
+/// The physical key to inject on `target` when the Windows keyboard sends `key`
+/// (R-KEYS-2): Ctrl → Cmd and Win → Control for a Mac. Alt stays Alt, which is
+/// Option on a Mac, and AltGr stays the right Alt. Left stays left, right stays
+/// right. Everything else, and every other target, is unchanged.
+pub fn remap_windows_key(target: OsFamily, key: PhysKey) -> PhysKey {
+    if target != OsFamily::Macos {
+        return key;
+    }
+    let right = key.vk == VK_RCONTROL || (VK_CONTROLS.contains(&key.vk) && key.extended);
+    if VK_CONTROLS.contains(&key.vk) {
+        let vk = if right { VK_RWIN } else { VK_LWIN };
+        return PhysKey {
+            vk,
+            scan: vk,
+            extended: true,
+        };
+    }
+    if key.vk == VK_LWIN || key.vk == VK_RWIN {
+        let right = key.vk == VK_RWIN;
+        return PhysKey {
+            vk: if right { VK_RCONTROL } else { VK_LCONTROL },
+            scan: 0x1D,
+            extended: right,
+        };
+    }
+    key
+}
+
 /// Character produced by a combo on a Swedish layout. Dead-key sequences are
 /// represented by their result (`¨`+`o` is a later layer; `¨` alone is the
 /// diaeresis character when followed by space, encoded here as the lone press
@@ -291,5 +338,32 @@ mod tests {
             map(OsFamily::Windows, OsFamily::Windows).translate(combo),
             combo
         );
+    }
+
+    #[test]
+    fn windows_to_mac_swaps_ctrl_and_win_and_keeps_sides() {
+        let k = |vk, scan, extended| PhysKey { vk, scan, extended };
+        let lctrl = k(0xA2, 0x1D, false);
+        let rctrl = k(0xA3, 0x1D, true);
+        let lwin = k(0x5B, 0x5B, true);
+        let rwin = k(0x5C, 0x5C, true);
+        assert_eq!(remap_windows_key(OsFamily::Macos, lctrl), lwin);
+        assert_eq!(remap_windows_key(OsFamily::Macos, rctrl), rwin);
+        assert_eq!(remap_windows_key(OsFamily::Macos, lwin), lctrl);
+        assert_eq!(remap_windows_key(OsFamily::Macos, rwin), rctrl);
+        // Alt, AltGr and letters are left alone.
+        for key in [k(0xA4, 0x38, false), k(0xA5, 0x38, true), k(0x41, 0x1E, false)] {
+            assert_eq!(remap_windows_key(OsFamily::Macos, key), key);
+        }
+    }
+
+    #[test]
+    fn windows_to_windows_changes_nothing() {
+        let lctrl = PhysKey {
+            vk: 0xA2,
+            scan: 0x1D,
+            extended: false,
+        };
+        assert_eq!(remap_windows_key(OsFamily::Windows, lctrl), lctrl);
     }
 }

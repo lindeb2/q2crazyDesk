@@ -53,8 +53,37 @@ fn panels() -> Vec<OsPanel> {
     crate::q2_local::read_panels()
 }
 
-/// Only Windows reports monitor sizes so far. Peers fall back to 96 dpi.
-#[cfg(not(windows))]
+/// Active displays with the physical size macOS reports for each (from EDID).
+/// Sizes are in the same units the session reports: `CGDisplayPixelsWide/High`.
+#[cfg(target_os = "macos")]
+fn panels() -> Vec<OsPanel> {
+    use core_graphics::display::CGDisplay;
+
+    let Ok(ids) = CGDisplay::active_displays() else {
+        return Vec::new();
+    };
+    ids.into_iter()
+        .enumerate()
+        .map(|(index, id)| {
+            let display = CGDisplay::new(id);
+            let bounds = display.bounds();
+            let size = display.screen_size();
+            OsPanel {
+                index: index as u32,
+                x: bounds.origin.x as i32,
+                y: bounds.origin.y as i32,
+                width: display.pixels_wide() as u32,
+                height: display.pixels_high() as u32,
+                width_mm: size.width,
+                height_mm: size.height,
+                scale: 1.0,
+            }
+        })
+        .collect()
+}
+
+/// Linux reports no monitor sizes yet. Peers fall back to 96 dpi.
+#[cfg(not(any(windows, target_os = "macos")))]
 fn panels() -> Vec<OsPanel> {
     Vec::new()
 }
