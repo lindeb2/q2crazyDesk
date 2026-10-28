@@ -74,6 +74,8 @@ pub mod virtual_display_manager;
 
 mod kcp_stream;
 mod q2_beside;
+#[cfg(windows)]
+mod q2_cursor;
 #[cfg(all(
     windows,
     feature = "flutter",

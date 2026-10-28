@@ -130,6 +130,13 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Not done, and the real risk:** if a peer's keyboard layout is not Swedish, map mode types the Swedish key's position, not its character. RustDesk's "translate" mode sends characters as Unicode and would fix that, but it needs the character for each key press, which `rdev::Keyboard` computes from the system's key state, and that state does not include keys q2 has swallowed. The state would have to be tracked by q2 and fed to `ToUnicodeEx`, including dead keys. It is not built; it needs a peer with a different layout to test against (R-KEYS-3 is only fully met for equal layouts).
 - **Mac controlling Windows** and a user-editable mapping (R-KEYS-1) are not built.
 
+### D-017 A visible cursor on a Windows computer with no mouse (R-INPUT-6) (2026-10-26)
+
+- **Problem:** Windows draws no pointer when no mouse is attached, so input injected from `win1` moves an invisible cursor.
+- **Decision:** `src/q2_cursor.rs` draws a plain white arrow with a black outline in a click-through, always-on-top, non-activating window (`WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE`) with a colour key for the background, and moves it to the pointer every 15 ms. It is the same idea as Mouse Without Borders' "draw mouse cursor". The arrow is drawn with GDI instead of copying the system cursor, because copying needs per-pixel alpha handling that could not be tried here.
+- **When it draws:** only in the `--server` process (the one in the user's session), only when `GetSystemMetrics(SM_MOUSEPRESENT)` says there is no mouse (checked every 2 s), and only while the pointer has moved in the last 30 s. `q2-draw-cursor=Y` forces it on (try it with a mouse attached), `N` switches it off.
+- **Known limits:** the arrow has a fixed size and does not follow the system cursor size or per-monitor scaling; it does not change shape for text or resize cursors; it is not drawn on the secure desktop (login screen, UAC prompt). Whether Windows really hides the pointer on this machine in the way assumed can only be seen on a computer with no mouse.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

@@ -132,6 +132,7 @@ winapi = { version = "0.3", features = [
     "processthreadsapi",
     "handleapi",
     "winbase",
+    "libloaderapi",
 ] }
 windows = { version = "0.61", features = [
     "Win32",

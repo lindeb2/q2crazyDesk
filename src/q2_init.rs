@@ -15,6 +15,8 @@ pub fn apply() {
     Config::set_option("direct-server".to_owned(), "Y".to_owned());
     crate::q2_local::start();
     crate::q2_service::start();
+    #[cfg(windows)]
+    crate::q2_cursor::start();
     crate::q2_beside::start();
     static START: Once = Once::new();
     START.call_once(|| {
