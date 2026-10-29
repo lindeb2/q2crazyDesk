@@ -64,6 +64,69 @@ mod imp {
         total / WHEEL_NOTCH
     }
 
+    /// A paired device says the person is now using it. If this computer was
+    /// sending its input there, stop (R-DEV-2). Returns whether it stopped.
+    pub(super) fn handle_claim(from: std::net::IpAddr) -> bool {
+        let peer = from.to_string();
+        let outs = with_beside(|b| {
+            if b.captured_peer() == Some(peer.as_str()) {
+                b.release()
+            } else {
+                Vec::new()
+            }
+        })
+        .unwrap_or_default();
+        let released = !outs.is_empty();
+        execute(outs);
+        released
+    }
+
+    /// Earliest time the next claim may be sent.
+    static NEXT_CLAIM: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+    /// The person used this computer's own mouse or keyboard: tell the paired
+    /// peers online, so that one that was driving this computer lets go
+    /// (R-DEV-2). At most one round per second; when nobody had anything to let
+    /// go of, the next round waits 5 seconds.
+    pub(super) fn notify_claim() {
+        use std::time::{Duration, Instant};
+
+        let now = Instant::now();
+        match NEXT_CLAIM.lock() {
+            Ok(mut next) => {
+                if next.is_some_and(|at| now < at) {
+                    return;
+                }
+                *next = Some(now + Duration::from_secs(1));
+            }
+            Err(_) => return,
+        }
+        let spawned = std::thread::Builder::new()
+            .name("q2-claim".to_owned())
+            .spawn(|| {
+                let peers = hbb_common::config::LanPeers::load().peers;
+                let mut released = false;
+                for peer in peers {
+                    if !peer.online || !crate::q2_peers::is_paired_peer(&peer.id) {
+                        continue;
+                    }
+                    let Ok(ip) = peer.id.parse::<std::net::IpAddr>() else {
+                        continue;
+                    };
+                    let addr = std::net::SocketAddr::new(ip, q2_sync::service::CLAIM_PORT);
+                    if let Ok(true) = q2_sync::service::send_claim(addr, Duration::from_secs(1)) {
+                        released = true;
+                    }
+                }
+                if !released {
+                    if let Ok(mut next) = NEXT_CLAIM.lock() {
+                        *next = Some(Instant::now() + Duration::from_secs(5));
+                    }
+                }
+            });
+        let _ = spawned;
+    }
+
     pub(super) fn execute(outs: Vec<Out>) {
         for out in outs {
             match out {
@@ -429,7 +492,7 @@ mod windows {
     use hbb_common::log;
 
     use super::control::{apply_settings, drive, Link, TICK};
-    use super::imp::{execute, with_beside};
+    use super::imp::{execute, handle_claim, notify_claim, with_beside};
 
     pub fn start() {
         static START: std::sync::Once = std::sync::Once::new();
@@ -441,14 +504,27 @@ mod windows {
             return;
         }
         let installed = crate::q2_hook::install(Box::new(|input| {
-            let step = with_beside(|b| b.handle(input)).unwrap_or_default();
+            let (step, physical) =
+                with_beside(|b| (b.handle(input), b.take_physical())).unwrap_or_default();
             let swallow = step.swallow;
             execute(step.out);
+            if physical {
+                notify_claim();
+            }
             swallow
         }));
         if !installed {
             log::error!("q2 beside: the input hooks did not start");
             return;
+        }
+        // Other devices tell this one here when the person starts using them.
+        let on_claim: q2_sync::service::OnClaim = std::sync::Arc::new(handle_claim);
+        let provider: q2_sync::service::Provider = std::sync::Arc::new(|| Vec::new());
+        let bind = std::net::SocketAddr::from(([0, 0, 0, 0], q2_sync::service::CLAIM_PORT));
+        if let Err(err) =
+            q2_sync::service::serve(bind, crate::q2_service::paired_allow(), provider, on_claim)
+        {
+            log::error!("q2 beside: the claim port is not available: {err}");
         }
         let spawned = thread::Builder::new()
             .name("q2-beside".to_owned())

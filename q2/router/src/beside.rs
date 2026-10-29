@@ -136,6 +136,8 @@ pub struct Beside {
     last_pos: (i32, i32),
     /// Keys of a shortcut that was acted on. Their repeats and release are hidden.
     swallow_up: BTreeSet<u32>,
+    /// Physical input has arrived on this computer since `take_physical`.
+    physical: bool,
 }
 
 impl Default for Beside {
@@ -159,11 +161,20 @@ impl Beside {
             held_local: BTreeSet::new(),
             last_pos: (0, 0),
             swallow_up: BTreeSet::new(),
+            physical: false,
         }
     }
 
     pub fn is_captured(&self) -> bool {
         matches!(self.state, State::Captured(_))
+    }
+
+    /// The peer this computer is sending its input to, if any.
+    pub fn captured_peer(&self) -> Option<&str> {
+        match &self.state {
+            State::Captured(c) => Some(&c.peer),
+            State::Local => None,
+        }
     }
 
     /// This computer's monitors, as the OS arranges them.
@@ -220,7 +231,17 @@ impl Beside {
         }
     }
 
+    /// True once if the person has used this computer's own mouse or keyboard
+    /// while it was not sending its input elsewhere (R-DEV-2). The caller tells
+    /// the other devices, so that whichever computer is driving this one lets go.
+    pub fn take_physical(&mut self) -> bool {
+        std::mem::take(&mut self.physical)
+    }
+
     pub fn handle(&mut self, input: Input) -> Step {
+        if matches!(self.state, State::Local) {
+            self.physical = true;
+        }
         match std::mem::replace(&mut self.state, State::Local) {
             State::Local => self.local_input(input),
             State::Captured(c) => self.captured_input(c, input),
@@ -1305,5 +1326,39 @@ mod tests {
         let mut b = guarded(guards);
         b.handle(phys(0xA2, 0x21D, false, true));
         assert_eq!(b.handle(Input::Move { x: 1919, y: 540 }), Step::default());
+    }
+
+    #[test]
+    fn using_this_computer_while_it_is_not_sending_input_is_reported_once() {
+        let mut b = ready();
+        assert!(!b.take_physical());
+        b.handle(Input::Move { x: 300, y: 300 });
+        b.handle(key(0x41, true));
+        assert!(b.take_physical());
+        assert!(!b.take_physical());
+        b.handle(Input::Button {
+            button: Button::Left,
+            down: true,
+        });
+        assert!(b.take_physical());
+    }
+
+    #[test]
+    fn input_that_is_being_sent_to_a_peer_does_not_count() {
+        let mut b = captured();
+        b.take_physical();
+        b.handle(Input::Move { x: 970, y: 545 });
+        b.handle(key(0x41, true));
+        assert!(!b.take_physical());
+    }
+
+    #[test]
+    fn the_captured_peer_is_known_only_while_capturing() {
+        let mut b = ready();
+        assert_eq!(b.captured_peer(), None);
+        b.handle(Input::Move { x: 1919, y: 540 });
+        assert_eq!(b.captured_peer(), Some(PEER));
+        b.release();
+        assert_eq!(b.captured_peer(), None);
     }
 }

@@ -137,6 +137,13 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **When it draws:** only in the `--server` process (the one in the user's session), only when `GetSystemMetrics(SM_MOUSEPRESENT)` says there is no mouse (checked every 2 s), and only while the pointer has moved in the last 30 s. `q2-draw-cursor=Y` forces it on (try it with a mouse attached), `N` switches it off.
 - **Known limits:** the arrow has a fixed size and does not follow the system cursor size or per-monitor scaling; it does not change shape for text or resize cursors; it is not drawn on the secure desktop (login screen, UAC prompt). Whether Windows really hides the pointer on this machine in the way assumed can only be seen on a computer with no mouse.
 
+### D-018 Last input wins across devices (R-DEV-2) (2026-10-26)
+
+- **Rule:** the computer where the person last used the physical mouse or keyboard is the controller. If one computer was driving another, it lets go as soon as the person starts using the driven one.
+- **How:** a computer that sees physical input while it is not sending its own input elsewhere (`Beside::take_physical`; injected input is never shown to the hook, so remote control of this computer does not count) sends a *claim* to every paired peer that is online. A peer that was sending its input to the claimer ends its capture (releases held keys, returns the cursor) and answers "released". Claims are sent at most once a second; when nobody had anything to release, the next round waits 5 s, so typing on an idle desk does not open a connection per key.
+- **Transport:** the `claim` request of the q2 service (D-015), on its own port, `21131`. It is hosted only by the main window, because that process owns the input hooks and the capture state. The monitor port `21130` is often held by the `--server` process, which would have swallowed the claims.
+- **Limits:** it needs the main window to be running on both computers (the hook lives there). A Mac cannot claim control yet because there is no macOS hook, and the Mac-trackpad case in R-DEV-2 depends on that. Two devices claiming at the same moment end with whoever's claim is received second letting go of the other, which settles itself on the next physical input.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

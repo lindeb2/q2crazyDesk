@@ -1,6 +1,7 @@
 //! The small service every q2 device runs so that its peers can ask it things
-//! that RustDesk's protocol cannot carry: for now the physical size of its
-//! monitors (R-LAYOUT-2, R-LAYOUT-3), later the layout documents (R-LAYOUT-7).
+//! that RustDesk's protocol cannot carry: the physical size of its monitors
+//! (R-LAYOUT-2, R-LAYOUT-3), a claim of control (R-DEV-2), and later the layout
+//! documents (R-LAYOUT-7).
 //!
 //! One request per connection: the client sends one line of JSON, the server
 //! answers with one line of JSON and closes. The server only answers addresses
@@ -19,6 +20,10 @@ use serde::{Deserialize, Serialize};
 
 /// RustDesk uses 21115 to 21119; this is the next free one.
 pub const PORT: u16 = 21130;
+/// Claims of control go to the process that owns the input hooks, which is the
+/// main window. It listens here, so the `--server` process holding `PORT` does
+/// not swallow them.
+pub const CLAIM_PORT: u16 = 21131;
 
 const MAX_REQUEST_BYTES: u64 = 4096;
 const MAX_REPLY_BYTES: u64 = 256 * 1024;
@@ -29,6 +34,9 @@ const MAX_CONNECTIONS: usize = 8;
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Request {
     Monitors,
+    /// "The person is using my own mouse or keyboard." Whoever is driving me
+    /// should let go.
+    Claim,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -36,8 +44,17 @@ struct Monitors {
     panels: Vec<OsPanel>,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct Claimed {
+    /// True when the receiver was driving the sender and has let go.
+    released: bool,
+}
+
 pub type Allow = Arc<dyn Fn(IpAddr) -> bool + Send + Sync>;
 pub type Provider = Arc<dyn Fn() -> Vec<OsPanel> + Send + Sync>;
+/// Called with the address of a device that claims control. Returns whether
+/// this device was driving it and has let go.
+pub type OnClaim = Arc<dyn Fn(IpAddr) -> bool + Send + Sync>;
 
 pub struct Server {
     addr: SocketAddr,
@@ -58,7 +75,12 @@ impl Server {
 }
 
 /// Start answering on `bind` in background threads.
-pub fn serve(bind: SocketAddr, allow: Allow, provider: Provider) -> io::Result<Server> {
+pub fn serve(
+    bind: SocketAddr,
+    allow: Allow,
+    provider: Provider,
+    on_claim: OnClaim,
+) -> io::Result<Server> {
     let listener = TcpListener::bind(bind)?;
     let addr = listener.local_addr()?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -80,11 +102,12 @@ pub fn serve(bind: SocketAddr, allow: Allow, provider: Provider) -> io::Result<S
                 }
                 let allow = allow.clone();
                 let provider = provider.clone();
+                let on_claim = on_claim.clone();
                 let counter = active.clone();
                 let spawned = thread::Builder::new()
                     .name("q2-sync-conn".to_owned())
                     .spawn(move || {
-                        let _ = answer(stream, &allow, &provider);
+                        let _ = answer(stream, &allow, &provider, &on_claim);
                         counter.fetch_sub(1, Ordering::SeqCst);
                     });
                 if spawned.is_err() {
@@ -95,7 +118,12 @@ pub fn serve(bind: SocketAddr, allow: Allow, provider: Provider) -> io::Result<S
     Ok(Server { addr, stop })
 }
 
-fn answer(mut stream: TcpStream, allow: &Allow, provider: &Provider) -> io::Result<()> {
+fn answer(
+    mut stream: TcpStream,
+    allow: &Allow,
+    provider: &Provider,
+    on_claim: &OnClaim,
+) -> io::Result<()> {
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
     let peer = stream.peer_addr()?.ip();
@@ -109,6 +137,9 @@ fn answer(mut stream: TcpStream, allow: &Allow, provider: &Provider) -> io::Resu
     };
     let reply = match request {
         Request::Monitors => serde_json::to_vec(&Monitors { panels: provider() }),
+        Request::Claim => serde_json::to_vec(&Claimed {
+            released: on_claim(peer),
+        }),
     }
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     stream.write_all(&reply)?;
@@ -116,12 +147,12 @@ fn answer(mut stream: TcpStream, allow: &Allow, provider: &Provider) -> io::Resu
     stream.shutdown(Shutdown::Both)
 }
 
-/// Ask the device at `addr` for the monitors it has.
-pub fn fetch_monitors(addr: SocketAddr, timeout: Duration) -> io::Result<Vec<OsPanel>> {
+/// Send one request and read the one-line answer.
+fn ask(addr: SocketAddr, timeout: Duration, request: &Request) -> io::Result<String> {
     let mut stream = TcpStream::connect_timeout(&addr, timeout)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
-    let request = serde_json::to_vec(&Request::Monitors)
+    let request = serde_json::to_vec(request)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     stream.write_all(&request)?;
     stream.write_all(b"\n")?;
@@ -133,9 +164,24 @@ pub fn fetch_monitors(addr: SocketAddr, timeout: Duration) -> io::Result<Vec<OsP
             "the device did not answer",
         ));
     }
+    Ok(line)
+}
+
+/// Ask the device at `addr` for the monitors it has.
+pub fn fetch_monitors(addr: SocketAddr, timeout: Duration) -> io::Result<Vec<OsPanel>> {
+    let line = ask(addr, timeout, &Request::Monitors)?;
     let reply: Monitors = serde_json::from_str(line.trim())
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     Ok(reply.panels)
+}
+
+/// Tell the device at `addr` that the person is now using this device. Returns
+/// whether that device was driving this one and has let go.
+pub fn send_claim(addr: SocketAddr, timeout: Duration) -> io::Result<bool> {
+    let line = ask(addr, timeout, &Request::Claim)?;
+    let reply: Claimed = serde_json::from_str(line.trim())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok(reply.released)
 }
 
 #[cfg(test)]
@@ -156,9 +202,14 @@ mod tests {
     }
 
     fn start(allow: bool, panels: Vec<OsPanel>) -> Server {
+        start_claiming(allow, panels, false)
+    }
+
+    fn start_claiming(allow: bool, panels: Vec<OsPanel>, releases: bool) -> Server {
         let allow: Allow = Arc::new(move |_| allow);
         let provider: Provider = Arc::new(move || panels.clone());
-        serve("127.0.0.1:0".parse().unwrap(), allow, provider).unwrap()
+        let on_claim: OnClaim = Arc::new(move |ip| releases && ip.is_loopback());
+        serve("127.0.0.1:0".parse().unwrap(), allow, provider, on_claim).unwrap()
     }
 
     #[test]
@@ -206,5 +257,22 @@ mod tests {
         server.stop();
         thread::sleep(Duration::from_millis(100));
         assert!(fetch_monitors(addr, Duration::from_millis(500)).is_err());
+    }
+
+    #[test]
+    fn a_claim_reports_whether_the_receiver_let_go() {
+        let server = start_claiming(true, vec![], true);
+        assert!(send_claim(server.local_addr(), Duration::from_secs(2)).unwrap());
+        server.stop();
+        let server = start_claiming(true, vec![], false);
+        assert!(!send_claim(server.local_addr(), Duration::from_secs(2)).unwrap());
+        server.stop();
+    }
+
+    #[test]
+    fn a_claim_from_an_unknown_address_is_ignored() {
+        let server = start_claiming(false, vec![], true);
+        assert!(send_claim(server.local_addr(), Duration::from_secs(2)).is_err());
+        server.stop();
     }
 }

@@ -12,9 +12,17 @@ use std::sync::{Arc, Once};
 
 use hbb_common::{config::Config, log};
 use q2_layout::OsPanel;
-use q2_sync::service::{self, Allow, Provider};
+use q2_sync::service::{self, Allow, OnClaim, Provider};
 
 use crate::q2_peers::PAIRED_KEY;
+
+/// Only paired Tailscale addresses are answered.
+pub fn paired_allow() -> Allow {
+    Arc::new(|ip| match ip {
+        IpAddr::V4(v4) => q2_net::is_paired_ip(&Config::get_option(PAIRED_KEY), v4),
+        IpAddr::V6(_) => false,
+    })
+}
 
 pub fn start() {
     static START: Once = Once::new();
@@ -22,14 +30,13 @@ pub fn start() {
         if !hosts_service() {
             return;
         }
-        let allow: Allow = Arc::new(|ip| match ip {
-            IpAddr::V4(v4) => q2_net::is_paired_ip(&Config::get_option(PAIRED_KEY), v4),
-            IpAddr::V6(_) => false,
-        });
         let provider: Provider = Arc::new(panels);
+        // Claims of control belong to the main window, which owns the input
+        // hooks (`q2_beside`). This port only answers questions.
+        let on_claim: OnClaim = Arc::new(|_| false);
         let bind = SocketAddr::from(([0, 0, 0, 0], service::PORT));
         // The service keeps running in its own threads for the life of the process.
-        if let Err(err) = service::serve(bind, allow, provider) {
+        if let Err(err) = service::serve(bind, paired_allow(), provider, on_claim) {
             log::info!("q2 service not started here (another process may own the port): {err}");
         }
     });
