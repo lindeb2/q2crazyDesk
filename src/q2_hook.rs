@@ -179,6 +179,7 @@ mod macos {
     use core_graphics::event::{
         CGEvent, CGEventFlags, CGEventType, EventField,
     };
+    use foreign_types::ForeignType;
     use hbb_common::log;
     use q2_router::{Button, Input};
 
@@ -237,7 +238,7 @@ mod macos {
         if (event_type as u32) == 0x0E {
             return cg_event;
         }
-        let event = CGEvent::new_with_event(cg_event);
+        let event = std::mem::ManuallyDrop::new(CGEvent::from_ptr(cg_event as _));
         if let Some(input) = convert(event_type, &event) {
             if dispatch(input) {
                 event.set_type(CGEventType::Null);
@@ -261,7 +262,7 @@ mod macos {
             CGEventType::RightMouseDown => Some(Input::Button { button: Button::Right, down: true }),
             CGEventType::RightMouseUp => Some(Input::Button { button: Button::Right, down: false }),
             CGEventType::OtherMouseDown => {
-                let num = event.get_integer_value_field(EventField::MouseEventButtonNumber);
+                let num = event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER);
                 let button = if num == 2 {
                     Button::Middle
                 } else if num == 3 {
@@ -272,7 +273,7 @@ mod macos {
                 Some(Input::Button { button, down: true })
             }
             CGEventType::OtherMouseUp => {
-                let num = event.get_integer_value_field(EventField::MouseEventButtonNumber);
+                let num = event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER);
                 let button = if num == 2 {
                     Button::Middle
                 } else if num == 3 {
@@ -283,8 +284,8 @@ mod macos {
                 Some(Input::Button { button, down: false })
             }
             CGEventType::ScrollWheel => {
-                let dy = event.get_integer_value_field(EventField::ScrollWheelEventDeltaAxis1) as i32;
-                let dx = event.get_integer_value_field(EventField::ScrollWheelEventDeltaAxis2) as i32;
+                let dy = event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_1) as i32;
+                let dx = event.get_integer_value_field(EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_2) as i32;
                 if dy != 0 {
                     Some(Input::Wheel { vertical: true, delta: dy * 120 })
                 } else if dx != 0 {
@@ -294,15 +295,15 @@ mod macos {
                 }
             }
             CGEventType::KeyDown => {
-                let code = event.get_integer_value_field(EventField::KeyboardEventKeycode) as u32;
+                let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
                 Some(Input::Key { vk: code, scan: code, extended: false, down: true })
             }
             CGEventType::KeyUp => {
-                let code = event.get_integer_value_field(EventField::KeyboardEventKeycode) as u32;
+                let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
                 Some(Input::Key { vk: code, scan: code, extended: false, down: false })
             }
             CGEventType::FlagsChanged => {
-                let code = event.get_integer_value_field(EventField::KeyboardEventKeycode) as u32;
+                let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u32;
                 let flags = event.get_flags();
                 let down = match code {
                     0x37 | 0x36 => flags.contains(CGEventFlags::CGEventFlagCommand),

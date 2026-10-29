@@ -234,7 +234,7 @@ mod imp {
         use rdev::{Event, EventType};
         use std::time::SystemTime;
 
-        let mapped_vk = q2_keys::remap_macos_key(q2_keys::OsFamily::Windows, vk);
+        let mapped_vk = q2_router::remap_macos_key(q2_router::OsFamily::Windows, vk);
         let key = rdev::macos_key_from_code(mapped_vk);
         let event_type = if down {
             EventType::KeyPress(key)

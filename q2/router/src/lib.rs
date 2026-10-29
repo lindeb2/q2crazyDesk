@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use beside::{physical_size_of, Beside, Button, Input, Out, Step, Target};
 pub use capture::{Capture, ExitRule, Motion};
 pub use hotkey::Hotkey;
-pub use q2_keys::OsFamily;
+pub use q2_keys::{remap_macos_key, remap_windows_key, OsFamily};
 
 use q2_keys::Key;
 use q2_layout::{try_cross, Canvas, Crossing, DeviceId, Edge, MonitorId, EDGE_EPS_MM};
