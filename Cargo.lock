@@ -6443,8 +6443,16 @@ name = "q2-sync"
 version = "0.1.0"
 dependencies = [
  "q2-layout",
+ "q2-wake",
  "serde 1.0.228",
  "serde_json 1.0.118",
+]
+
+[[package]]
+name = "q2-wake"
+version = "0.1.0"
+dependencies = [
+ "serde 1.0.228",
 ]
 
 [[package]]
@@ -7196,6 +7204,7 @@ dependencies = [
  "q2-net",
  "q2-router",
  "q2-sync",
+ "q2-wake",
  "qrcode-generator",
  "rdev",
  "remote_printer",
