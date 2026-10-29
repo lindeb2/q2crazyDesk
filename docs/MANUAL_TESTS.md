@@ -93,17 +93,27 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 - **Expected:** under 10 ms added.
 - **Result:** not run
 
+### T-2-8 Beside settings GUI (R-INPUT-4, R-INPUT-5, R-INPUT-6, R-UI-2)
+- **Steps:** on `win1`, open Settings -> Beside tab. Change corner dead zone, toggle "Require modifier to cross", set a hotkey, and change "Draw cursor on mouseless target".
+- **Expected:** settings apply live without restarting the application; inputs reflect the new settings immediately.
+- **Result:** not run
+
+### T-2-9 Mac controlling Windows (R-DEV-1, R-DEV-2, R-KEYS-2)
+- **Steps:** sit at the Mac. Move the cursor across the screen edge toward `win1`. Type Cmd+C, Cmd+V, Control, and Swedish characters (`å ä ö @`).
+- **Expected:** cursor captures and appears on `win1`. Cmd+C triggers Ctrl+C on Windows (copy), Control triggers Windows key, and `@` (Option+2 on Mac) produces `@` on Windows. Touching `win1`'s physical mouse takes control back immediately (last-input-wins).
+- **Result:** not run
+
 ## Phase 3 — Inside
 
 ### T-3-1 Window enter/leave (R-PLACE-2, R-INPUT-2)
-- **Steps:** switch `win2` to Inside (windowed) on `win1`. Move into the window without clicking, then out through the border.
-- **Expected:** control follows the mouse. No click required.
-- **Result:** not run
+- **Steps:** switch `win2` to Inside (windowed) on `win1`. Move into the window without clicking, then out through any of the four borders.
+- **Expected:** control follows the mouse. No click required. Moving past any border exits back to host.
+- **Result:** not run (Capture `ExitRule::AllBorders` unit tested in `q2-router`).
 
 ### T-3-2 Fullscreen exits (R-LAYOUT-6)
 - **Steps:** fullscreen Inside of `win2` on one `win1` monitor. Leave through a linked edge toward `win1`'s other monitor and toward the Mac.
 - **Expected:** those edges exit; unlinked edges stay walls.
-- **Result:** not run
+- **Result:** not run (Capture `ExitRule::LinkedEdges` unit tested in `q2-router`).
 
 ### T-3-3 Film (R-VIDEO-1, R-VIDEO-2, R-AUDIO-2)
 - **Steps:** play a 1080p film on `win2`, watch it in an Inside window on `win1` with 4:4:4 on.
@@ -115,17 +125,17 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 ### T-4-1 Sync (R-LAYOUT-7)
 - **Steps:** move a monitor on the Mac editor. Check `win1`.
 - **Expected:** `win1` updates. Last writer wins if both edit.
-- **Result:** not run
+- **Result:** not run (Sync protocol and last-writer-wins unit tested in `q2-sync`).
 
 ### T-4-2 Live placement switch (R-PLACE-5)
-- **Steps:** switch `win2` Beside → Inside → Beside in one action each.
-- **Expected:** under about one second, no new pairing.
-- **Result:** not run
+- **Steps:** switch `win2` Beside → Inside → Beside in one action each using the canvas editor or quick placement dropdown.
+- **Expected:** under about one second, no new pairing or reconnection delay.
+- **Result:** not run (Live video stream toggle on existing session tested).
 
 ### T-4-3 Profile restore (R-LAYOUT-8)
 - **Steps:** unplug the Mac (or turn Tailscale off on it). Use `win1`+`win2`. Plug the Mac back in.
 - **Expected:** the three-device profile returns.
-- **Result:** not run
+- **Result:** not run (Profile store exact match and closest subset selection unit tested in `q2-layout`).
 
 ## Phase 5 — Lent
 
@@ -144,18 +154,18 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 
 ### T-6-1 Copy/paste files (R-FILES-1, R-CLIP-1)
 - **Steps:** copy a folder on `win1`, paste on the Mac and on `win2`. Reverse.
-- **Expected:** files arrive; large files show progress.
-- **Result:** not run
+- **Expected:** files arrive; large files show progress. Background clipboard listener syncs across headless Beside sessions.
+- **Result:** not run (Session clipboard listener activation wired in `q2_session`).
 
 ### T-6-2 Drag files across a Beside edge (R-FILES-2)
 - **Steps:** drag a file from `win1`'s desktop across the edge onto `win2` and onto the Mac, and into an Inside window.
-- **Expected:** the file lands in the drop target.
-- **Result:** not run
+- **Expected:** the file lands in the drop target. Left mouse button stays held across the edge boundary until dropped.
+- **Result:** not run (`held_buttons` tracking and cross-edge button transfer unit tested in `q2-router`).
 
 ### T-6-3 Audio routing (R-AUDIO-1, R-AUDIO-3)
 - **Steps:** play sound on `win2` in Beside (own speakers), then forward to `win1`. Repeat with the Mac as source.
-- **Expected:** sound follows the setting. macOS capture works on macOS 26.
-- **Result:** not run
+- **Expected:** sound follows the setting (`q2-forward-audio`). macOS capture works on macOS 26.
+- **Result:** not run (Audio option link to placement wired in `q2_beside`).
 
 ### T-6-4 Login and UAC on `win2` (R-LOGIN-1)
 - **Steps:** lock `win2`. From `win1`, in Beside, type the password. Trigger a UAC prompt on `win2` and accept it.
@@ -163,9 +173,9 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 - **Result:** not run
 
 ### T-6-5 Wake (R-WAKE-1, R-WAKE-2)
-- **Steps:** sleep `win2`. From `win1` on Ethernet, Wake. Then sleep `win2` again and Wake from the Mac on another network (or with Tailscale only).
-- **Expected:** `win2` wakes. Away-from-home uses a home relay.
-- **Result:** not run
+- **Steps:** configure target MAC in Beside settings (`q2-device-macs` or input field). Sleep `win2`. From `win1` on Ethernet, trigger Wake. Then sleep `win2` again and trigger Wake from the Mac on another network (via Tailscale).
+- **Expected:** `win2` wakes. Direct broadcast sends magic packet on home LAN; away-from-home relays request to online home peer on TCP port 21130.
+- **Result:** not run (unit tests for packet layout, UDP broadcast, TCP wake relay, and settings trigger pass).
 
 ## Phase 7 — away and Android
 
@@ -177,6 +187,18 @@ User confirmed on 2026-10-25, after run 40154488523: one card per computer, the 
 ### T-7-2 Mac on another network (R-NET-1)
 - **Steps:** take the Mac off the home Wi-Fi. Open Inside sessions to `win1` and `win2`.
 - **Expected:** both sessions work over Tailscale.
+- **Result:** not run
+
+## Phase 8 — diagnostics and quick tray actions
+
+### T-8-1 In-app diagnostics and log export (R-UI-2, Section 12)
+- **Steps:** on `win1` (or the Mac), open Settings -> Diagnostics tab. Verify that peer connection status, measured input latency (< 10 ms budget), active profile, virtual display status, and error logs are shown. Click "Open Log Folder" and "Copy Log Path".
+- **Expected:** diagnostics are rendered cleanly with live status indicators; clicking "Open Log Folder" launches the log directory in Explorer/Finder, and "Copy Log Path" copies the path to clipboard.
+- **Result:** not run
+
+### T-8-2 Tray quick menu placement, wake, editor (R-UI-4)
+- **Steps:** right-click the q2crazyDesk tray icon in the Windows taskbar or macOS menu bar. Click "Placement: Beside", then "Placement: Inside", then "Wake Devices", then "Canvas Editor".
+- **Expected:** placement options switch the default placement live without opening the full UI; "Wake Devices" dispatches magic packets to configured MAC addresses; "Canvas Editor" brings up the physical canvas editor window.
 - **Result:** not run
 
 ## Smoke (after an upstream merge)

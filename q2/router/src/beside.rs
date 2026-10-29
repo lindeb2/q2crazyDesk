@@ -133,6 +133,7 @@ pub struct Beside {
     fullscreen_app: Option<String>,
     /// Physical keys that are down on this computer, as seen while not captured.
     held_local: BTreeSet<(u32, u32, bool)>,
+    held_buttons: BTreeSet<Button>,
     last_pos: (i32, i32),
     /// Keys of a shortcut that was acted on. Their repeats and release are hidden.
     swallow_up: BTreeSet<u32>,
@@ -159,6 +160,7 @@ impl Beside {
             jump: None,
             fullscreen_app: None,
             held_local: BTreeSet::new(),
+            held_buttons: BTreeSet::new(),
             last_pos: (0, 0),
             swallow_up: BTreeSet::new(),
             physical: false,
@@ -293,6 +295,14 @@ impl Beside {
                 extended,
                 down,
             } => self.local_key(vk, scan, extended, down),
+            Input::Button { button, down } => {
+                if down {
+                    self.held_buttons.insert(button);
+                } else {
+                    self.held_buttons.remove(&button);
+                }
+                Step::default()
+            }
             _ => Step::default(),
         }
     }
@@ -480,6 +490,11 @@ impl Beside {
                     captured.keys.insert((vk, scan, extended));
                     out.push(key_out(target.os, vk, scan, extended, true));
                 }
+            }
+            // Mouse buttons held on this computer (e.g. during a drag) continue on the peer.
+            for &button in &self.held_buttons {
+                captured.buttons.insert(button);
+                out.push(Out::Button { button, down: true });
             }
             self.state = State::Captured(captured);
             return Step { swallow: true, out };
@@ -717,6 +732,27 @@ mod tests {
         let step = b.handle(Input::Move { x: 1919, y: 540 });
         assert!(step.swallow);
         b
+    }
+
+    #[test]
+    fn drag_with_button_held_forwards_button_down_and_releases_on_leave() {
+        let mut b = ready();
+        b.handle(Input::Button {
+            button: Button::Left,
+            down: true,
+        });
+        let step = b.handle(Input::Move { x: 1919, y: 540 });
+        assert!(step.swallow);
+        assert!(b.is_captured());
+        assert!(step.out.contains(&Out::Button {
+            button: Button::Left,
+            down: true,
+        }));
+        let outs = b.release();
+        assert!(outs.contains(&Out::Button {
+            button: Button::Left,
+            down: false,
+        }));
     }
 
     #[test]

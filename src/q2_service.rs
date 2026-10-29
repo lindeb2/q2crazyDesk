@@ -9,12 +9,61 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Once};
+use std::time::Duration;
 
 use hbb_common::{config::Config, log};
-use q2_layout::OsPanel;
-use q2_sync::service::{self, Allow, OnClaim, Provider};
+use q2_layout::{Canvas, OsPanel};
+use q2_sync::{
+    service::{self, Allow, LayoutProvider, OnClaim, OnLayout, OnWake, Provider},
+    Versioned,
+};
 
 use crate::q2_peers::PAIRED_KEY;
+
+pub const LAYOUT_KEY: &str = "q2-layout-doc";
+
+/// Load the locally stored synced layout document, if any.
+pub fn load_layout() -> Option<Versioned<Canvas>> {
+    let raw = Config::get_option(LAYOUT_KEY);
+    if raw.trim().is_empty() {
+        return None;
+    }
+    serde_json::from_str(&raw).ok()
+}
+
+/// Save the synced layout document locally.
+pub fn save_layout(doc: &Versioned<Canvas>) {
+    if let Ok(json) = serde_json::to_string(doc) {
+        Config::set_option(LAYOUT_KEY.to_owned(), json);
+    }
+}
+
+/// Update local layout from incoming peer layout (last-writer-wins).
+pub fn update_incoming_layout(incoming: Versioned<Canvas>) -> (bool, Option<Versioned<Canvas>>) {
+    let mut current = load_layout();
+    if let Some(cur) = current.as_mut() {
+        let accepted = cur.merge_incoming(incoming);
+        if accepted {
+            save_layout(cur);
+        }
+        (accepted, Some(cur.clone()))
+    } else {
+        save_layout(&incoming);
+        (true, Some(incoming))
+    }
+}
+
+/// Synchronize the layout document with a peer at `addr`.
+pub fn sync_layout_with_peer(addr: SocketAddr, timeout: Duration) {
+    if let Ok(remote_doc) = service::fetch_layout(addr, timeout) {
+        if let Some(remote) = remote_doc {
+            update_incoming_layout(remote);
+        }
+    }
+    if let Some(local) = load_layout() {
+        let _ = service::push_layout(addr, timeout, local);
+    }
+}
 
 /// Only paired Tailscale addresses are answered.
 pub fn paired_allow() -> Allow {
@@ -34,9 +83,22 @@ pub fn start() {
         // Claims of control belong to the main window, which owns the input
         // hooks (`q2_beside`). This port only answers questions.
         let on_claim: OnClaim = Arc::new(|_| false);
+        let layout_provider: LayoutProvider = Arc::new(load_layout);
+        let on_layout: OnLayout = Arc::new(update_incoming_layout);
+        let on_wake: OnWake = Arc::new(|mac| {
+            q2_wake::send_magic_packet(q2_wake::MacAddr(mac)).is_ok()
+        });
         let bind = SocketAddr::from(([0, 0, 0, 0], service::PORT));
         // The service keeps running in its own threads for the life of the process.
-        if let Err(err) = service::serve(bind, paired_allow(), provider, on_claim) {
+        if let Err(err) = service::serve_with(
+            bind,
+            paired_allow(),
+            provider,
+            on_claim,
+            layout_provider,
+            on_layout,
+            on_wake,
+        ) {
             log::info!("q2 service not started here (another process may own the port): {err}");
         }
     });
@@ -56,14 +118,14 @@ fn hosts_service() -> bool {
 }
 
 #[cfg(windows)]
-fn panels() -> Vec<OsPanel> {
+pub fn panels() -> Vec<OsPanel> {
     crate::q2_local::read_panels()
 }
 
 /// Active displays with the physical size macOS reports for each (from EDID).
 /// Sizes are in the same units the session reports: `CGDisplayPixelsWide/High`.
 #[cfg(target_os = "macos")]
-fn panels() -> Vec<OsPanel> {
+pub fn panels() -> Vec<OsPanel> {
     use core_graphics::display::CGDisplay;
 
     let Ok(ids) = CGDisplay::active_displays() else {
@@ -91,6 +153,6 @@ fn panels() -> Vec<OsPanel> {
 
 /// Linux reports no monitor sizes yet. Peers fall back to 96 dpi.
 #[cfg(not(any(windows, target_os = "macos")))]
-fn panels() -> Vec<OsPanel> {
+pub fn panels() -> Vec<OsPanel> {
     Vec::new()
 }

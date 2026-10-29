@@ -189,7 +189,12 @@ mod imp {
         crate::platform::windows::set_cursor_pos(x, y);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    fn warp(x: i32, y: i32) {
+        crate::platform::macos::set_cursor_pos(x, y);
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
     fn warp(_x: i32, _y: i32) {}
 
     /// Send a physical key the way RustDesk's own client does in map mode, so
@@ -224,7 +229,31 @@ mod imp {
         crate::keyboard::client::process_event_with_session("map", &event, None, &*session);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    fn send_key(session: &FlutterSession, vk: u32, _scan: u32, _extended: bool, down: bool) {
+        use rdev::{Event, EventType};
+        use std::time::SystemTime;
+
+        let mapped_vk = q2_keys::remap_macos_key(q2_keys::OsFamily::Windows, vk);
+        let key = rdev::macos_key_from_code(mapped_vk);
+        let event_type = if down {
+            EventType::KeyPress(key)
+        } else {
+            EventType::KeyRelease(key)
+        };
+        let event = Event {
+            time: SystemTime::now(),
+            unicode: None,
+            event_type,
+            platform_code: mapped_vk,
+            position_code: mapped_vk,
+            usb_hid: 0,
+            extra_data: 0,
+        };
+        crate::keyboard::client::process_event_with_session("map", &event, None, &*session);
+    }
+
+    #[cfg(not(any(windows, target_os = "macos")))]
     fn send_key(_session: &FlutterSession, _vk: u32, _scan: u32, _extended: bool, _down: bool) {}
 
     #[cfg(test)]
@@ -253,6 +282,13 @@ pub fn start() {
         not(any(target_os = "android", target_os = "ios"))
     ))]
     windows::start();
+
+    #[cfg(all(
+        target_os = "macos",
+        feature = "flutter",
+        not(any(target_os = "android", target_os = "ios"))
+    ))]
+    macos::start();
 }
 
 /// Keeps one session open to a paired peer and tells the state machine when it
@@ -341,6 +377,7 @@ mod control {
                 if let Ok(mut slot) = answer.lock() {
                     *slot = Some(panels);
                 }
+                crate::q2_service::sync_layout_with_peer(addr, MM_TIMEOUT);
                 asking.store(false, Ordering::SeqCst);
             });
         if spawned.is_err() {
@@ -388,11 +425,40 @@ mod control {
                 b.set_fullscreen_app(None);
             }
         });
+
+        let wake_trigger = Config::get_option("q2-wake-trigger");
+        if !wake_trigger.trim().is_empty() {
+            Config::set_option("q2-wake-trigger".to_owned(), "".to_owned());
+            if let Some(mac) = q2_wake::MacAddr::parse(wake_trigger.trim()) {
+                let _ = q2_wake::send_magic_packet(mac);
+                let peers = LanPeers::load().peers;
+                for p in peers {
+                    if p.online && crate::q2_peers::is_paired_peer(&p.id) {
+                        if let Ok(ip) = p.id.parse::<IpAddr>() {
+                            let addr = SocketAddr::new(ip, q2_sync::service::PORT);
+                            let _ = thread::Builder::new()
+                                .name("q2-wake-relay".to_owned())
+                                .spawn(move || {
+                                    let _ = q2_sync::service::send_wake_relay(
+                                        addr,
+                                        Duration::from_secs(2),
+                                        mac.0,
+                                    );
+                                });
+                        }
+                    }
+                }
+            }
+        }
+
         block_fullscreen
     }
 
     /// The first paired Tailscale peer that is online.
     fn pick_peer() -> Option<String> {
+        if hbb_common::config::Config::get_option("q2-auto-connect") == "N" {
+            return None;
+        }
         LanPeers::load()
             .peers
             .into_iter()
@@ -466,6 +532,37 @@ mod control {
             }
             return;
         }
+
+        let placement = Config::get_option(&format!("q2-placement-{}", l.peer));
+        let is_inside = placement.starts_with("inside");
+        let i444 = Config::get_option("q2-inside-444") != "N";
+        if is_inside {
+            if i444 {
+                Config::set_option(base::config::keys::OPTION_I444.to_owned(), "Y".to_owned());
+                Config::set_option(
+                    base::config::keys::OPTION_CODEC_PREFERENCE.to_owned(),
+                    "vp9".to_owned(),
+                );
+            }
+            q2_session::set_video_enabled(&l.peer, true);
+        } else {
+            q2_session::set_video_enabled(&l.peer, false);
+        }
+
+        let forward_audio = if is_inside {
+            Config::get_option("q2-forward-audio") != "N"
+        } else {
+            Config::get_option("q2-forward-audio") == "Y"
+        };
+        Config::set_option(
+            base::config::keys::OPTION_DISABLE_AUDIO.to_owned(),
+            if forward_audio {
+                "N".to_owned()
+            } else {
+                "Y".to_owned()
+            },
+        );
+
         let target = Target {
             peer: l.peer.clone(),
             size_px: l.size,
@@ -549,6 +646,71 @@ mod windows {
                 let app = crate::q2_fullscreen::foreground_fullscreen_app();
                 with_beside(|b| b.set_fullscreen_app(app));
             }
+            drive(&mut link);
+        }
+    }
+}
+
+#[cfg(all(
+    target_os = "macos",
+    feature = "flutter",
+    not(any(target_os = "android", target_os = "ios"))
+))]
+mod macos {
+    use std::thread;
+
+    use hbb_common::log;
+
+    use super::control::{apply_settings, drive, Link, TICK};
+    use super::imp::{execute, handle_claim, notify_claim, with_beside};
+
+    pub fn start() {
+        static START: std::sync::Once = std::sync::Once::new();
+        START.call_once(start_once);
+    }
+
+    fn start_once() {
+        let installed = crate::q2_hook::install(Box::new(|input| {
+            let (step, physical) =
+                with_beside(|b| (b.handle(input), b.take_physical())).unwrap_or_default();
+            let swallow = step.swallow;
+            execute(step.out);
+            if physical {
+                notify_claim();
+            }
+            swallow
+        }));
+        if !installed {
+            log::error!("q2 beside: the input hooks did not start on macos");
+            return;
+        }
+        let on_claim: q2_sync::service::OnClaim = std::sync::Arc::new(handle_claim);
+        let provider: q2_sync::service::Provider = std::sync::Arc::new(|| Vec::new());
+        let bind = std::net::SocketAddr::from(([0, 0, 0, 0], q2_sync::service::CLAIM_PORT));
+        if let Err(err) =
+            q2_sync::service::serve(bind, crate::q2_service::paired_allow(), provider, on_claim)
+        {
+            log::error!("q2 beside: the claim port is not available: {err}");
+        }
+        let spawned = thread::Builder::new()
+            .name("q2-beside".to_owned())
+            .spawn(control_loop);
+        if let Err(err) = spawned {
+            log::error!("q2 beside: control thread did not start: {err}");
+        }
+    }
+
+    fn control_loop() {
+        let mut panels = Vec::new();
+        let mut link: Option<Link> = None;
+        loop {
+            thread::sleep(TICK);
+            let now = crate::q2_service::panels();
+            if now != panels {
+                panels = now.clone();
+                with_beside(|b| b.set_local_panels(now));
+            }
+            let _ = apply_settings();
             drive(&mut link);
         }
     }

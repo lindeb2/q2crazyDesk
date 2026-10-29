@@ -13,6 +13,8 @@ pub fn apply() {
     // Direct IP is unencrypted. Only paired Tailscale addresses are accepted (R-NET-3, R-DEV-3).
     crate::q2_peers::apply_whitelist();
     Config::set_option("direct-server".to_owned(), "Y".to_owned());
+    let log_path = Config::log_path().to_string_lossy().into_owned();
+    Config::set_option("q2-log-path".to_owned(), log_path);
     crate::q2_local::start();
     crate::q2_service::start();
     #[cfg(windows)]

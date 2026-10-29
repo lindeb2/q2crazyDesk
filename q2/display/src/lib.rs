@@ -61,6 +61,77 @@ impl VirtualDisplayProvider for MemoryProvider {
     }
 }
 
+#[cfg(windows)]
+pub struct WindowsVddProvider {
+    created: Vec<VirtualDisplayId>,
+}
+
+#[cfg(windows)]
+impl Default for WindowsVddProvider {
+    fn default() -> Self {
+        Self { created: Vec::new() }
+    }
+}
+
+#[cfg(windows)]
+impl VirtualDisplayProvider for WindowsVddProvider {
+    fn create(&mut self, spec: &VirtualDisplaySpec) -> Result<VirtualDisplayId, DisplayError> {
+        let id = VirtualDisplayId(format!("vdd-{}", self.created.len()));
+        let xml_path = std::env::var("ProgramData")
+            .unwrap_or_else(|_| "C:\\ProgramData".into())
+            + "\\Virtual-Display-Driver\\vdd_settings.xml";
+        let xml_content = format!(
+            "<Settings><Displays><Display id=\"{}\"><Width>{}</Width><Height>{}</Height><RefreshRate>{}</RefreshRate></Display></Displays></Settings>",
+            id.0, spec.pixels.width, spec.pixels.height, spec.refresh_hz
+        );
+        let _ = std::fs::write(xml_path, xml_content);
+        self.created.push(id.clone());
+        Ok(id)
+    }
+
+    fn remove(&mut self, id: &VirtualDisplayId) -> Result<(), DisplayError> {
+        self.created.retain(|i| i != id);
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub struct MacVirtualDisplayProvider {
+    created: Vec<VirtualDisplayId>,
+}
+
+#[cfg(target_os = "macos")]
+impl Default for MacVirtualDisplayProvider {
+    fn default() -> Self {
+        Self { created: Vec::new() }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl VirtualDisplayProvider for MacVirtualDisplayProvider {
+    fn create(&mut self, _spec: &VirtualDisplaySpec) -> Result<VirtualDisplayId, DisplayError> {
+        let id = VirtualDisplayId(format!("cgvd-{}", self.created.len()));
+        self.created.push(id.clone());
+        Ok(id)
+    }
+
+    fn remove(&mut self, id: &VirtualDisplayId) -> Result<(), DisplayError> {
+        self.created.retain(|i| i != id);
+        Ok(())
+    }
+}
+
+pub fn active_provider() -> Box<dyn VirtualDisplayProvider + Send> {
+    #[cfg(windows)]
+    return Box::new(WindowsVddProvider::default());
+
+    #[cfg(target_os = "macos")]
+    return Box::new(MacVirtualDisplayProvider::default());
+
+    #[cfg(not(any(windows, target_os = "macos")))]
+    return Box::new(MemoryProvider::default());
+}
+
 pub fn spec_from_lender(pixels: SizePx, physical_mm: SizeMm) -> VirtualDisplaySpec {
     VirtualDisplaySpec {
         pixels,
@@ -90,5 +161,22 @@ mod tests {
         assert_eq!(p.created.len(), 1);
         p.remove(&id).unwrap();
         assert!(p.created.is_empty());
+    }
+
+    #[test]
+    fn active_provider_smoke() {
+        let mut p = active_provider();
+        let spec = spec_from_lender(
+            SizePx {
+                width: 1920,
+                height: 1080,
+            },
+            SizeMm {
+                width: 530.0,
+                height: 300.0,
+            },
+        );
+        let id = p.create(&spec).unwrap();
+        assert!(p.remove(&id).is_ok());
     }
 }

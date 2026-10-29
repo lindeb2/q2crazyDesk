@@ -75,6 +75,7 @@ name = "q2-sync"
 version = "0.1.0"
 dependencies = [
  "q2-layout",
+ "q2-wake",
  "serde",
  "serde_json",
 ]

@@ -22,6 +22,31 @@ use crate::ui_session_interface::io_loop;
 
 /// Peer address (a Tailscale `100.x` address) to the session id that q2 opened.
 static BESIDE: Mutex<Option<HashMap<String, SessionID>>> = Mutex::new(None);
+static VIDEO_ENABLED: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+
+pub fn set_video_enabled(peer: &str, enabled: bool) {
+    if let Ok(mut map) = VIDEO_ENABLED.lock() {
+        map.get_or_insert_with(HashMap::new)
+            .insert(peer.to_owned(), enabled);
+    }
+    if let Some(session) = session_for(peer) {
+        if enabled {
+            session.capture_displays(vec![0], vec![], vec![0]);
+        } else {
+            session.capture_displays(vec![], vec![], vec![]);
+        }
+    }
+}
+
+pub fn is_video_enabled(peer: &str) -> bool {
+    let Ok(map) = VIDEO_ENABLED.lock() else {
+        return false;
+    };
+    map.as_ref()
+        .and_then(|m| m.get(peer))
+        .copied()
+        .unwrap_or(false)
+}
 
 const POLL: Duration = Duration::from_millis(100);
 
@@ -83,6 +108,13 @@ pub fn connect(peer: &str) -> ResultType<FlutterSession> {
         false,
         None,
     )?;
+    #[cfg(feature = "flutter")]
+    #[cfg(not(target_os = "ios"))]
+    crate::client::Client::set_is_text_clipboard_required(true);
+
+    #[cfg(all(feature = "flutter", feature = "unix-file-copy-paste"))]
+    crate::client::Client::set_is_file_clipboard_required(true);
+
     remember(peer, session_id)?;
     // `insert_session` keeps an existing session to the same peer and only adds
     // a handler to it, so always use what the table holds.
@@ -104,17 +136,18 @@ pub fn connect(peer: &str) -> ResultType<FlutterSession> {
             };
             io_loop(for_loop, round);
         })?;
-    keep_video_off(session_id);
+    keep_video_off(peer.to_owned(), session_id);
     Ok(session)
 }
 
-/// Every time the peer's info (re)arrives, which is after each login and each
-/// reconnect, drop all video subscriptions. Ends when the session is gone.
-fn keep_video_off(session_id: SessionID) {
+/// Watches session readiness and applies the current video subscription setting
+/// (video off for Beside, displays captured for Inside). Ends when the session is gone.
+fn keep_video_off(peer: String, session_id: SessionID) {
     let spawned = thread::Builder::new()
-        .name("q2-beside-video-off".to_owned())
+        .name("q2-video-watcher".to_owned())
         .spawn(move || {
             let mut was_ready = false;
+            let mut last_video = is_video_enabled(&peer);
             loop {
                 thread::sleep(POLL);
                 let Some(session) = sessions::get_session_by_session_id(&session_id) else {
@@ -125,14 +158,20 @@ fn keep_video_off(session_id: SessionID) {
                     .read()
                     .map(|lc| lc.peer_info.is_some())
                     .unwrap_or(false);
-                if ready && !was_ready {
-                    session.capture_displays(vec![], vec![], vec![]);
+                let video = is_video_enabled(&peer);
+                if (ready && !was_ready) || (ready && video != last_video) {
+                    if video {
+                        session.capture_displays(vec![0], vec![], vec![0]);
+                    } else {
+                        session.capture_displays(vec![], vec![], vec![]);
+                    }
+                    last_video = video;
                 }
                 was_ready = ready;
             }
         });
     if let Err(err) = spawned {
-        log::error!("q2 could not start the video-off watcher: {err}");
+        log::error!("q2 could not start the video watcher: {err}");
     }
 }
 
@@ -146,6 +185,11 @@ pub fn disconnect(peer: &str) {
     }
     sessions::remove_session_by_session_id(&id);
     if let Ok(mut map) = BESIDE.lock() {
+        if let Some(map) = map.as_mut() {
+            map.remove(peer);
+        }
+    }
+    if let Ok(mut map) = VIDEO_ENABLED.lock() {
         if let Some(map) = map.as_mut() {
             map.remove(peer);
         }

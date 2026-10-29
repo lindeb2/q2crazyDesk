@@ -15,8 +15,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use q2_layout::OsPanel;
+use q2_layout::{Canvas, OsPanel};
 use serde::{Deserialize, Serialize};
+
+use crate::Versioned;
 
 /// RustDesk uses 21115 to 21119; this is the next free one.
 pub const PORT: u16 = 21130;
@@ -25,18 +27,24 @@ pub const PORT: u16 = 21130;
 /// not swallow them.
 pub const CLAIM_PORT: u16 = 21131;
 
-const MAX_REQUEST_BYTES: u64 = 4096;
+const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_REPLY_BYTES: u64 = 256 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_CONNECTIONS: usize = 8;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "op", rename_all = "snake_case")]
-enum Request {
+pub enum Request {
     Monitors,
     /// "The person is using my own mouse or keyboard." Whoever is driving me
     /// should let go.
     Claim,
+    /// Ask for the current synced canvas document.
+    GetLayout,
+    /// Push an updated canvas document (R-LAYOUT-7).
+    PutLayout { doc: Versioned<Canvas> },
+    /// Wake a sleeping machine via local broadcast relay (R-WAKE-2).
+    Wake { mac: [u8; 6] },
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -50,11 +58,30 @@ struct Claimed {
     released: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct LayoutReply {
+    doc: Option<Versioned<Canvas>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct PutLayoutReply {
+    accepted: bool,
+    current: Option<Versioned<Canvas>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct WakeReply {
+    ok: bool,
+}
+
 pub type Allow = Arc<dyn Fn(IpAddr) -> bool + Send + Sync>;
 pub type Provider = Arc<dyn Fn() -> Vec<OsPanel> + Send + Sync>;
 /// Called with the address of a device that claims control. Returns whether
 /// this device was driving it and has let go.
 pub type OnClaim = Arc<dyn Fn(IpAddr) -> bool + Send + Sync>;
+pub type LayoutProvider = Arc<dyn Fn() -> Option<Versioned<Canvas>> + Send + Sync>;
+pub type OnLayout = Arc<dyn Fn(Versioned<Canvas>) -> (bool, Option<Versioned<Canvas>>) + Send + Sync>;
+pub type OnWake = Arc<dyn Fn([u8; 6]) -> bool + Send + Sync>;
 
 pub struct Server {
     addr: SocketAddr,
@@ -81,6 +108,27 @@ pub fn serve(
     provider: Provider,
     on_claim: OnClaim,
 ) -> io::Result<Server> {
+    serve_with(
+        bind,
+        allow,
+        provider,
+        on_claim,
+        Arc::new(|| None),
+        Arc::new(|doc| (true, Some(doc))),
+        Arc::new(|mac| q2_wake::send_magic_packet(q2_wake::MacAddr(mac)).is_ok()),
+    )
+}
+
+/// Start answering on `bind` with full handlers including layout sync and wake relay.
+pub fn serve_with(
+    bind: SocketAddr,
+    allow: Allow,
+    provider: Provider,
+    on_claim: OnClaim,
+    layout_provider: LayoutProvider,
+    on_layout: OnLayout,
+    on_wake: OnWake,
+) -> io::Result<Server> {
     let listener = TcpListener::bind(bind)?;
     let addr = listener.local_addr()?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -103,11 +151,22 @@ pub fn serve(
                 let allow = allow.clone();
                 let provider = provider.clone();
                 let on_claim = on_claim.clone();
+                let layout_provider = layout_provider.clone();
+                let on_layout = on_layout.clone();
+                let on_wake = on_wake.clone();
                 let counter = active.clone();
                 let spawned = thread::Builder::new()
                     .name("q2-sync-conn".to_owned())
                     .spawn(move || {
-                        let _ = answer(stream, &allow, &provider, &on_claim);
+                        let _ = answer(
+                            stream,
+                            &allow,
+                            &provider,
+                            &on_claim,
+                            &layout_provider,
+                            &on_layout,
+                            &on_wake,
+                        );
                         counter.fetch_sub(1, Ordering::SeqCst);
                     });
                 if spawned.is_err() {
@@ -123,6 +182,9 @@ fn answer(
     allow: &Allow,
     provider: &Provider,
     on_claim: &OnClaim,
+    layout_provider: &LayoutProvider,
+    on_layout: &OnLayout,
+    on_wake: &OnWake,
 ) -> io::Result<()> {
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -140,6 +202,17 @@ fn answer(
         Request::Claim => serde_json::to_vec(&Claimed {
             released: on_claim(peer),
         }),
+        Request::GetLayout => serde_json::to_vec(&LayoutReply {
+            doc: layout_provider(),
+        }),
+        Request::PutLayout { doc } => {
+            let (accepted, current) = on_layout(doc);
+            serde_json::to_vec(&PutLayoutReply { accepted, current })
+        }
+        Request::Wake { mac } => {
+            let ok = on_wake(mac);
+            serde_json::to_vec(&WakeReply { ok })
+        }
     }
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     stream.write_all(&reply)?;
@@ -182,6 +255,39 @@ pub fn send_claim(addr: SocketAddr, timeout: Duration) -> io::Result<bool> {
     let reply: Claimed = serde_json::from_str(line.trim())
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     Ok(reply.released)
+}
+
+/// Ask the device at `addr` for its current synced canvas document.
+pub fn fetch_layout(
+    addr: SocketAddr,
+    timeout: Duration,
+) -> io::Result<Option<Versioned<Canvas>>> {
+    let line = ask(addr, timeout, &Request::GetLayout)?;
+    let reply: LayoutReply = serde_json::from_str(line.trim())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok(reply.doc)
+}
+
+/// Push a canvas document to `addr`. Returns whether the peer accepted the
+/// document and the peer's current document after the operation.
+pub fn push_layout(
+    addr: SocketAddr,
+    timeout: Duration,
+    doc: Versioned<Canvas>,
+) -> io::Result<(bool, Option<Versioned<Canvas>>)> {
+    let line = ask(addr, timeout, &Request::PutLayout { doc })?;
+    let reply: PutLayoutReply = serde_json::from_str(line.trim())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok((reply.accepted, reply.current))
+}
+
+/// Send a request to an online peer to send a Wake-on-LAN broadcast on its local
+/// network for `mac` (R-WAKE-2).
+pub fn send_wake_relay(addr: SocketAddr, timeout: Duration, mac: [u8; 6]) -> io::Result<bool> {
+    let line = ask(addr, timeout, &Request::Wake { mac })?;
+    let reply: WakeReply = serde_json::from_str(line.trim())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok(reply.ok)
 }
 
 #[cfg(test)]
@@ -273,6 +379,81 @@ mod tests {
     fn a_claim_from_an_unknown_address_is_ignored() {
         let server = start_claiming(false, vec![], true);
         assert!(send_claim(server.local_addr(), Duration::from_secs(2)).is_err());
+        server.stop();
+    }
+
+    #[test]
+    fn layout_sync_fetch_and_push() {
+        use std::sync::Mutex;
+        use q2_layout::DeviceId;
+
+        let doc = Arc::new(Mutex::new(Some(Versioned::new(
+            DeviceId("win1".into()),
+            Canvas::new(),
+        ))));
+
+        let doc_fetch = doc.clone();
+        let layout_provider: LayoutProvider = Arc::new(move || doc_fetch.lock().unwrap().clone());
+
+        let doc_push = doc.clone();
+        let on_layout: OnLayout = Arc::new(move |incoming| {
+            let mut slot = doc_push.lock().unwrap();
+            if let Some(current) = slot.as_mut() {
+                let accepted = current.merge_incoming(incoming);
+                (accepted, Some(current.clone()))
+            } else {
+                *slot = Some(incoming.clone());
+                (true, Some(incoming))
+            }
+        });
+
+        let allow: Allow = Arc::new(|_| true);
+        let provider: Provider = Arc::new(|| vec![]);
+        let on_claim: OnClaim = Arc::new(|_| false);
+
+        let server = serve_with(
+            "127.0.0.1:0".parse().unwrap(),
+            allow,
+            provider,
+            on_claim,
+            layout_provider,
+            on_layout,
+            Arc::new(|_| true),
+        )
+        .unwrap();
+
+        let got = fetch_layout(server.local_addr(), Duration::from_secs(2)).unwrap();
+        assert!(got.is_some());
+        assert_eq!(got.unwrap().version, 1);
+
+        // Push older version (should be rejected by merge_incoming)
+        let mut stale = Versioned::new(DeviceId("mac".into()), Canvas::new());
+        stale.version = 0;
+        let (accepted, current) =
+            push_layout(server.local_addr(), Duration::from_secs(2), stale).unwrap();
+        assert!(!accepted);
+        assert_eq!(current.unwrap().version, 1);
+
+        // Push newer version (should be accepted)
+        let mut newer = Versioned::new(DeviceId("mac".into()), Canvas::new());
+        newer.version = 5;
+        let (accepted, current) =
+            push_layout(server.local_addr(), Duration::from_secs(2), newer).unwrap();
+        assert!(accepted);
+        assert_eq!(current.unwrap().version, 5);
+
+        server.stop();
+    }
+
+    #[test]
+    fn wake_relay_sends_packet_and_reports_status() {
+        let server = start(true, vec![]);
+        let res = send_wake_relay(
+            server.local_addr(),
+            Duration::from_secs(2),
+            [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
+        );
+        assert!(res.unwrap());
         server.stop();
     }
 }

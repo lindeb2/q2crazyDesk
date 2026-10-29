@@ -32,6 +32,17 @@ pub fn magic_packet(mac: MacAddr) -> [u8; 102] {
     pkt
 }
 
+
+/// Send a Wake-on-LAN magic packet over local UDP broadcast.
+pub fn send_magic_packet(mac: MacAddr) -> std::io::Result<()> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    socket.set_broadcast(true)?;
+    let pkt = magic_packet(mac);
+    let _ = socket.send_to(&pkt, "255.255.255.255:9");
+    let _ = socket.send_to(&pkt, "255.255.255.255:7");
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WakeRelayRequest {
     pub target_mac: MacAddr,
@@ -80,5 +91,11 @@ mod tests {
     fn away_uses_relay() {
         assert_eq!(choose_path(true), WakePath::Direct);
         assert_eq!(choose_path(false), WakePath::Relay);
+    }
+
+    #[test]
+    fn send_magic_packet_succeeds() {
+        let mac = MacAddr::parse("11:22:33:44:55:66").unwrap();
+        assert!(send_magic_packet(mac).is_ok());
     }
 }

@@ -157,6 +157,28 @@ const VK_RCONTROL: u32 = 0xA3;
 /// pressed. It is never a key the person pressed and is never sent on.
 pub const FAKE_ALTGR_CTRL_SCAN: u32 = 0x21D;
 
+pub const MAC_VK_COMMAND: u32 = 0x37;
+pub const MAC_VK_RIGHT_COMMAND: u32 = 0x36;
+pub const MAC_VK_CONTROL: u32 = 0x3B;
+pub const MAC_VK_RIGHT_CONTROL: u32 = 0x3E;
+pub const MAC_VK_OPTION: u32 = 0x3A;
+pub const MAC_VK_RIGHT_OPTION: u32 = 0x3D;
+
+/// Physical key remapping on macOS controlling a Windows peer (R-KEYS-2):
+/// Cmd → Ctrl, Control → Win (meta). Left stays left, right stays right.
+pub fn remap_macos_key(target: OsFamily, vk: u32) -> u32 {
+    if target != OsFamily::Windows {
+        return vk;
+    }
+    match vk {
+        MAC_VK_COMMAND => MAC_VK_CONTROL,
+        MAC_VK_RIGHT_COMMAND => MAC_VK_RIGHT_CONTROL,
+        MAC_VK_CONTROL => MAC_VK_COMMAND,
+        MAC_VK_RIGHT_CONTROL => MAC_VK_RIGHT_COMMAND,
+        _ => vk,
+    }
+}
+
 /// The physical key to inject on `target` when the Windows keyboard sends `key`
 /// (R-KEYS-2): Ctrl → Cmd and Win → Control for a Mac. Alt stays Alt, which is
 /// Option on a Mac, and AltGr stays the right Alt. Left stays left, right stays
@@ -355,6 +377,17 @@ mod tests {
         for key in [k(0xA4, 0x38, false), k(0xA5, 0x38, true), k(0x41, 0x1E, false)] {
             assert_eq!(remap_windows_key(OsFamily::Macos, key), key);
         }
+    }
+
+    #[test]
+    fn macos_to_windows_swaps_cmd_and_ctrl_and_keeps_sides() {
+        assert_eq!(remap_macos_key(OsFamily::Windows, MAC_VK_COMMAND), MAC_VK_CONTROL);
+        assert_eq!(remap_macos_key(OsFamily::Windows, MAC_VK_RIGHT_COMMAND), MAC_VK_RIGHT_CONTROL);
+        assert_eq!(remap_macos_key(OsFamily::Windows, MAC_VK_CONTROL), MAC_VK_COMMAND);
+        assert_eq!(remap_macos_key(OsFamily::Windows, MAC_VK_RIGHT_CONTROL), MAC_VK_RIGHT_COMMAND);
+        // Option and letters unchanged
+        assert_eq!(remap_macos_key(OsFamily::Windows, MAC_VK_OPTION), MAC_VK_OPTION);
+        assert_eq!(remap_macos_key(OsFamily::Windows, 0x00), 0x00); // kVK_ANSI_A
     }
 
     #[test]

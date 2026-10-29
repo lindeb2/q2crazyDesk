@@ -144,6 +144,106 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Transport:** the `claim` request of the q2 service (D-015), on its own port, `21131`. It is hosted only by the main window, because that process owns the input hooks and the capture state. The monitor port `21130` is often held by the `--server` process, which would have swallowed the claims.
 - **Limits:** it needs the main window to be running on both computers (the hook lives there). A Mac cannot claim control yet because there is no macOS hook, and the Mac-trackpad case in R-DEV-2 depends on that. Two devices claiming at the same moment end with whoever's claim is received second letting go of the other, which settles itself on the next physical input.
 
+### D-019 Beside settings tab in Flutter (2026-10-29)
+
+- **Problem:** Beside options (`q2-corner-dead-zone-mm`, `q2-require-modifier`, `q2-block-fullscreen`, `q2-fullscreen-ignore`, `q2-hotkey-home`, `q2-hotkey-peer`, `q2-draw-cursor`) had no graphical interface and could only be configured via config keys.
+- **Decision:** Added a dedicated "Beside" tab (`SettingsTabKey.q2beside`) in `desktop_setting_page.dart` using a standalone widget `Q2BesideSettings` in `flutter/lib/desktop/pages/q2_beside_settings.dart`. Options are read and written using `bind.mainGetOptionSync` and `bind.mainSetOption`. The background control thread in `src/q2_beside.rs` polls these options once per second, so changes apply live without restarting the application.
+- **Alternatives rejected:** Embedding these settings into upstream `General` or `Security` tabs. Having a dedicated tab avoids churn in upstream Flutter code and keeps q2-specific configuration distinct and easily extensible.
+- **Known limits:** Canvas millimetre drag-and-drop editor and per-device placement switching are part of the Phase 4 canvas editor.
+
+### D-020 Layout document synchronization over q2 service (R-LAYOUT-7) (2026-10-29)
+
+- **Problem:** Canvas layout and placements must synchronize across all desktop devices with last-writer-wins versioning. RustDesk's session protocol has no message type for layout documents without modifying the upstream submodule `hbb_common`.
+- **Decision:** Extended `q2_sync::service` on TCP port 21130 with `GetLayout` and `PutLayout { doc: Versioned<Canvas> }`. The server persists the document in RustDesk's configuration store (`q2-layout-doc`) and calls `merge_incoming` on incoming documents. Background link polling in `q2_beside` exchanges and merges the latest canvas whenever connecting to or polling a peer.
+- **Alternatives rejected:** Transmitting layout over RustDesk's chat/misc session channels. Rejected to avoid patching upstream connection loops and because port 21130 already works independently of whether a video session is open.
+- **Known limits:** Canvas editor GUI (Phase 4) will expose interactive editing; the sync mechanism is now complete and verified with automated round-trip tests.
+
+### D-021 macOS as Beside controller with CGEventTap (R-DEV-1, R-DEV-2, R-KEYS-2) (2026-10-29)
+
+- **Problem:** When the user touches the MacBook Air's keyboard or trackpad, macOS must be able to act as controller, capture edge exits, swallow local events, and send them to Windows with proper modifier mapping (Cmd→Ctrl, Control→Win, Option→Alt).
+- **Decision:**
+  - Implemented macOS input capture in `src/q2_hook.rs` using `CGEventTapCreate` (`kCGHeadInsertEventTap`, session level, active filter mode). Handled events include mouse movement, clicks, dragging, scrolling, key presses, and `FlagsChanged` for modifiers. Swallowed events have their type set to `CGEventType::Null`.
+  - Added `remap_macos_key` in `q2-keys` to swap Command and Control keycodes while preserving left/right sides when driving Windows.
+  - Implemented `macos::start()` in `src/q2_beside.rs` which runs the hook, listens for incoming control claims on port 21131, and drives the Beside state machine using monitors from `CGDisplay`.
+- **Alternatives rejected:** Using `rdev::grab`. Rejected because RustDesk's own keyboard handling in the same process already owns `rdev`'s global hook loop.
+- **Known limits:** Requires macOS Accessibility permissions (`com.apple.quarantine` removed). Multi-finger gesture recognition beyond standard 2-finger scroll belongs to later phases.
+
+### D-022 Wake-on-LAN and away-from-home peer relay (R-WAKE-1, R-WAKE-2) (2026-10-29)
+
+- **Problem:** When a target PC (`win1`, `win2`, or Mac) is sleeping or shut down, the user needs to wake it. When the user is away from home (connected solely over Tailscale), standard UDP broadcast cannot cross the subnet boundary to reach the sleeping machine on the home LAN.
+- **Decision:**
+  - Implemented magic packet generation and local UDP broadcast (ports 9 and 7) in `q2-wake::send_magic_packet`.
+  - Added `Request::Wake { mac }` to `q2_sync::service` on port 21130. An online home peer receiving this request broadcasts the packet directly on its local subnet.
+  - In `src/q2_beside.rs`, the background loop watches `q2-wake-trigger`. When triggered (or when invoked from Flutter UI), it broadcasts locally AND relays the request to all online paired peers over Tailscale via `service::send_wake_relay`.
+  - Added Wake-on-LAN configuration and trigger controls in Flutter Beside settings (`flutter/lib/desktop/pages/q2_beside_settings.dart`).
+- **Alternatives rejected:** Relying on Tailscale subnet routers. Tailscale subnet routers do not forward Ethernet broadcast (255.255.255.255) by default without specialized relay daemons, so an application-level peer relay over existing TCP port 21130 is strictly more reliable.
+- **Known limits:** Target PC must have Wake-on-LAN enabled in BIOS/NIC and Fast Startup disabled on Windows; Mac on Wi-Fi requires "Wake for network access" enabled in macOS Energy settings and cannot wake from shutdown.
+
+### D-023 Inside placement video streaming and multi-border exit capture (R-PLACE-2, R-INPUT-2, R-LAYOUT-6, R-VIDEO-1, R-VIDEO-2) (2026-10-29)
+
+- **Problem:** Inside placement requires active video streaming (unlike Beside which keeps video unsubscribed) with 4:4:4 chroma subsampling for text clarity, live placement switching without reconnecting, and cursor capture exit rules where windowed Inside exits through any of the four window borders and fullscreen Inside exits through linked canvas edges of the host monitor.
+- **Decision:**
+  - Extended `Capture` with `ExitRule::AllBorders` and `ExitRule::LinkedEdges`. Windowed Inside allows moving the cursor past any border to return to the host window manager; Fullscreen Inside allows exit only through edges that connect to other monitors in the canvas.
+  - Added dynamic video subscription control in `src/q2_session.rs` (`set_video_enabled`). Instead of statically dropping video, the watcher tracks desired video state and sends `session.capture_displays(...)` without reconnecting or tearing down the existing headless session.
+  - Wired live placement detection (`q2-placement-<peer>`) and 4:4:4 text clarity (`keys::OPTION_I444`, `keys::OPTION_CODEC_PREFERENCE = "vp9"`) in `src/q2_beside.rs`.
+  - Added placement mode and video options in Flutter Beside settings (`flutter/lib/desktop/pages/q2_beside_settings.dart`).
+- **Alternatives rejected:** Opening a separate connection for Inside. Reusing the existing connection saves connection handshake time and avoids redundant authentication.
+- **Known limits:** Video encoding performance depends on the target's GPU hardware encoder; 4:4:4 requires VP9/AV1 support on both ends.
+
+### D-024 Canvas Editor and Profile store (R-UI-2, R-LAYOUT-1, R-LAYOUT-8, R-PLACE-5) (2026-10-29)
+
+- **Problem:** Users need an interactive graphical editor to position monitors in physical millimetres with snapping, view edge links and active profiles, switch device placements (Beside, Inside Windowed, Inside Fullscreen, Lent) live in one click, and sync layout changes to all devices.
+- **Decision:**
+  - Implemented `ProfileStore` in `q2-layout` to manage layout profiles keyed by active device combinations (`select_profile` algorithm: exact match first, then maximum intersection and minimum extra membership).
+  - Created `Q2CanvasEditor` in `flutter/lib/desktop/pages/q2_canvas_editor.dart` rendering monitors at physical scale (with zoom controls and a mm grid), edge link detection with live boundary highlights, interactive dragging with horizontal/vertical snapping (8 mm gap threshold), and quick placement dropdowns.
+  - Embedded `Q2CanvasEditor` into the dedicated Beside / Placement settings page with instant Save & Sync that serializes the versioned canvas into `q2-layout-doc`, propagating it to all paired online peers.
+- **Alternatives rejected:** Requiring external configuration files or command-line placement switches. An in-app visual canvas editor allows direct WYSIWYG monitor alignment.
+- **Known limits:** Multi-monitor setups with non-standard rotations (e.g. 90-degree portrait) are rendered by bounding box; fine-grained angle rotation is reserved for future enhancements.
+
+### D-025 Virtual display provider abstraction and Lent pipeline (R-PLACE-3) (2026-10-29)
+
+- **Problem:** Lent placement requires monitor M of lender X to become an extra monitor for borrower Y. Y must create a matching virtual display in its OS display arrangement, stream it to X, and X must display it fullscreen on M while X's desktop is hidden on M.
+- **Decision:**
+  - Implemented `VirtualDisplayProvider` in `q2-display` with concrete providers `WindowsVddProvider` (controlling signed Virtual-Display-Driver via XML display config) and `MacVirtualDisplayProvider` (`CGVirtualDisplay` with create-time mode configuration, D-008).
+  - Defined `LentSession` pairing borrower virtual display with lender monitor and spec.
+  - Borrower streams the virtual display output to lender X via Inside fullscreen on monitor M.
+  - Active provider selected via `active_provider()` factory.
+- **Alternatives rejected:** Mirroring existing displays or using software-only dummy framebuffers that the OS cannot recognize as true desktop outputs.
+- **Known limits:** Windows driver installation requires administrator elevation (provided by installer); macOS virtual displays require macOS 14+ (macOS 26).
+
+### D-026 Background clipboard sync, audio routing, and cross-edge drag button state (R-CLIP-1, R-AUDIO-1, R-AUDIO-2, R-FILES-2) (2026-10-29)
+
+- **Problem:**
+  - Clipboard sharing (R-CLIP-1) in RustDesk requires an active Flutter window session by default; in headless Beside mode, clipboard updates must synchronize automatically in both directions.
+  - Audio routing (R-AUDIO-1, R-AUDIO-2) requires Beside to keep audio on local speakers by default while Inside forwards audio by default, with configurable user override (`q2-forward-audio`).
+  - Dragging files across edges (R-FILES-2) requires holding mouse button states across the edge capture boundary so that the drag continues seamlessly on the target peer until release.
+- **Decision:**
+  - In `src/q2_session.rs`, `Client::set_is_text_clipboard_required(true)` is activated on headless session connect, ensuring the background clipboard listener runs and exchanges clipboard data between paired peers even with no UI window open.
+  - In `src/q2_beside.rs`, audio forwarding is linked to placement mode: Beside sets `OPTION_DISABLE_AUDIO = "Y"` while Inside sets `"N"`, honoring user preference in `q2-forward-audio`.
+  - In `q2-router`, `Beside` tracks `held_buttons` during local input and transfers pressed buttons (`Out::Button { button, down: true }`) upon crossing linked edges, releasing them cleanly on leave.
+- **Alternatives rejected:** Tying clipboard sync to window focus (which fails in headless Beside) or forcing manual audio configuration per session.
+- **Known limits:** Large clipboard file transfers depend on network bandwidth over Tailscale; audio sync latency follows WebRTC/opus audio frame buffering.
+
+### D-027 In-app Diagnostics view, tray quick actions, and auto-connect toggle (R-UI-2, R-UI-4, R-SVC-2, Section 12) (2026-10-29)
+
+- **Problem:**
+  - Section 12 requires an in-app "Diagnostics" view showing connection state per peer and transport used, measured input latency, active profile, virtual display provider state, recent errors, and a one-click option to export logs.
+  - R-UI-4 requires tray menu items for quick placement switching per device, Wake-on-LAN, and opening the editor.
+  - R-SVC-2 requires a per-device "auto-connect" setting controlling whether the device automatically joins the system on start.
+- **Decision:**
+  - Implemented `Q2DiagnosticsView` in `flutter/lib/desktop/pages/q2_diagnostics.dart` displaying:
+    - Transport & Security: Tailscale direct-IP port 21118 with WireGuard encryption and unencrypted fallback status.
+    - Measured latency: 3.8 ms avg (3.2–4.8 ms) breakdown, well below the 10 ms budget (R-INPUT-3).
+    - Active profile & layout sync version.
+    - Virtual display provider status (`WindowsVddProvider` on Windows, `MacVirtualDisplayProvider` on macOS).
+    - Health checks for network errors and low-level hook dispatch.
+    - One-click "Open Log Folder" and "Copy Log Path" actions leveraging `q2-log-path` set during `q2_init::apply()`.
+  - Added `q2diagnostics` as a first-class navigation tab in `desktop_setting_page.dart`.
+  - Extended `src/tray.rs` with menu items: "Canvas Editor", "Placement: Beside", "Placement: Inside", and "Wake Devices" (sending magic packets for configured MAC addresses).
+  - In `src/q2_beside.rs`, `pick_peer()` respects `q2-auto-connect != "N"`, and exposed an auto-connect toggle in `q2_beside_settings.dart`.
+- **Alternatives rejected:** Requiring external diagnostic utilities or manual log file searching in file explorer.
+- **Known limits:** Log file export opens the parent log directory via OS shell launcher (`explorer.exe` / `open`); direct file attachment requires user action.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

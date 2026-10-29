@@ -11,6 +11,8 @@ import 'package:flutter_hbb/common/widgets/setting_widgets.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/q2_beside_settings.dart';
+import 'package:flutter_hbb/desktop/pages/q2_diagnostics.dart';
 import 'package:flutter_hbb/desktop/widgets/remote_toolbar.dart';
 import 'package:flutter_hbb/mobile/widgets/dialog.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -56,6 +58,8 @@ enum SettingsTabKey {
   account,
   printer,
   about,
+  q2beside,
+  q2diagnostics,
 }
 
 class DesktopSettingPage extends StatefulWidget {
@@ -77,6 +81,8 @@ class DesktopSettingPage extends StatefulWidget {
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideRemotePrinterSetting) != 'Y')
       SettingsTabKey.printer,
+    SettingsTabKey.q2beside,
+    SettingsTabKey.q2diagnostics,
     SettingsTabKey.about,
   ];
 
@@ -212,6 +218,14 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
           settingTabs
               .add(_TabInfo(tab, 'About', Icons.info_outline, Icons.info));
           break;
+        case SettingsTabKey.q2beside:
+          settingTabs.add(_TabInfo(tab, 'Beside',
+              Icons.swap_horiz_outlined, Icons.swap_horiz));
+          break;
+        case SettingsTabKey.q2diagnostics:
+          settingTabs.add(_TabInfo(tab, 'Diagnostics',
+              Icons.troubleshoot_outlined, Icons.troubleshoot));
+          break;
       }
     }
     return settingTabs;
@@ -241,6 +255,12 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
           break;
         case SettingsTabKey.about:
           children.add(const _About());
+          break;
+        case SettingsTabKey.q2beside:
+          children.add(const Q2BesideSettings());
+          break;
+        case SettingsTabKey.q2diagnostics:
+          children.add(const Q2DiagnosticsView());
           break;
       }
     }

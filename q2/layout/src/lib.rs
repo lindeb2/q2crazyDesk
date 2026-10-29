@@ -13,7 +13,7 @@ mod types;
 
 pub use canvas::{auto_link, try_cross, Crossing, EDGE_EPS_MM};
 pub use os_layout::{canvas_from_os_panels, crossing_correction, OsPanel};
-pub use profile::{select_profile, Profile};
+pub use profile::{select_profile, Profile, ProfileStore};
 pub use types::{
     Canvas, DeviceId, Edge, EdgeLink, InsideMode, Monitor, MonitorId, Placement, RectMm, SizeMm,
     SizePx,

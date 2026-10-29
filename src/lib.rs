@@ -83,7 +83,7 @@ mod q2_cursor;
 ))]
 mod q2_fullscreen;
 #[cfg(all(
-    windows,
+    any(windows, target_os = "macos"),
     feature = "flutter",
     not(any(target_os = "android", target_os = "ios"))
 ))]

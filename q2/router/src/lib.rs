@@ -11,7 +11,7 @@ mod hotkey;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use beside::{physical_size_of, Beside, Button, Input, Out, Step, Target};
-pub use capture::{Capture, Motion};
+pub use capture::{Capture, ExitRule, Motion};
 pub use hotkey::Hotkey;
 pub use q2_keys::OsFamily;
 

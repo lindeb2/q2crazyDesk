@@ -75,10 +75,14 @@ fn make_tray() -> hbb_common::ResultType<()> {
         None
     };
     let open_i = MenuItem::new(translate("Open".to_owned()), true, None);
+    let editor_i = MenuItem::new("Canvas Editor".to_owned(), true, None);
+    let beside_i = MenuItem::new("Placement: Beside".to_owned(), true, None);
+    let inside_i = MenuItem::new("Placement: Inside".to_owned(), true, None);
+    let wake_i = MenuItem::new("Wake Devices".to_owned(), true, None);
     if let Some(quit_i) = &quit_i {
-        tray_menu.append_items(&[&open_i, quit_i]).ok();
+        tray_menu.append_items(&[&open_i, &editor_i, &beside_i, &inside_i, &wake_i, quit_i]).ok();
     } else {
-        tray_menu.append_items(&[&open_i]).ok();
+        tray_menu.append_items(&[&open_i, &editor_i, &beside_i, &inside_i, &wake_i]).ok();
     }
     let tooltip = |count: usize| {
         if count == 0 {
@@ -188,7 +192,21 @@ fn make_tray() -> hbb_common::ResultType<()> {
         }
 
         if let Ok(event) = menu_channel.try_recv() {
-            if let Some(quit_i) = &quit_i {
+            if event.id == open_i.id() || event.id == editor_i.id() {
+                open_func();
+            } else if event.id == beside_i.id() {
+                hbb_common::config::Config::set_option("q2-placement-default".to_owned(), "beside".to_owned());
+            } else if event.id == inside_i.id() {
+                hbb_common::config::Config::set_option("q2-placement-default".to_owned(), "inside-windowed".to_owned());
+            } else if event.id == wake_i.id() {
+                let macs = hbb_common::config::Config::get_option("q2-device-macs");
+                for entry in macs.split(',') {
+                    let mac = entry.split('=').nth(1).unwrap_or(entry).trim();
+                    if !mac.is_empty() {
+                        hbb_common::config::Config::set_option("q2-wake-trigger".to_owned(), mac.to_owned());
+                    }
+                }
+            } else if let Some(quit_i) = &quit_i {
                 if event.id == quit_i.id() {
                     /* failed in windows, seems no permission to check system process
                     if !crate::check_process("--server", false) {

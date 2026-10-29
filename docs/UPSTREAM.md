@@ -38,6 +38,14 @@ Keep every edit to an upstream file listed here, grouped by purpose. New q2crazy
 | U-19 | `flutter/lib/desktop/pages/connection_page.dart` | Status dot follows a Tailscale error, and the public-server hint hides while that error is shown | The service dot stayed green beside `tailscale status --json`. |
 | U-20 | `src/platform/windows.rs` | In-app install renames `rustdesk.exe` to `q2crazyDesk.exe` | The copy left the old file name, then startup looked for `q2crazyDesk.exe` and the pink Install card came back. |
 | U-21 | `Cargo.toml`, `src/lib.rs` | Depend on `q2-layout`; `mod q2_local` | Local monitor crossing uses the millimetre canvas (R-LAYOUT-4). |
+| U-22 | `Cargo.toml`, `src/lib.rs` | Depend on `q2-router`, `q2-sync`, `q2-wake`; load `q2_beside`, `q2_service`, `q2_cursor`, `q2_fullscreen`, `q2_hook` | Beside input routing, monitor/layout sync on 21130, claim port 21131, cursor overlay. |
+| U-23 | `flutter/lib/desktop/pages/desktop_setting_page.dart` | Register `SettingsTabKey.q2beside` | Dedicated Beside, Canvas, and placement settings tab. |
+| U-24 | `src/q2_session.rs` | Dynamic video capture subscription and headless clipboard listener activation | Live Beside/Inside placement switching without reconnect; background clipboard sync. |
+| U-25 | `src/q2_beside.rs` | Video preference, 4:4:4 color toggle, audio routing link, and wake trigger handling | R-VIDEO-2, R-AUDIO-1, R-AUDIO-2, R-WAKE-1. |
+| U-26 | `src/q2_hook.rs` | macOS `CGEventTap` active input hook | R-DEV-1, R-DEV-2 macOS controller support. |
+| U-27 | `src/q2_init.rs` | Expose `q2-log-path` from `Config::log_path()` | In-app one-click log export (Section 12). |
+| U-28 | `src/tray.rs` | Add Canvas Editor, Placement Beside/Inside, and Wake Devices menu items | R-UI-4 quick tray actions. |
+| U-29 | `flutter/lib/desktop/pages/desktop_setting_page.dart` | Register `SettingsTabKey.q2diagnostics` tab | R-UI-2, Section 12 Diagnostics view. |
 
 ## LittleBigMouse (ported into `q2/layout`)
 

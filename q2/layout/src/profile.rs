@@ -10,6 +10,31 @@ pub struct Profile {
     pub canvas: Canvas,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProfileStore {
+    pub profiles: Vec<Profile>,
+}
+
+impl ProfileStore {
+    pub fn new() -> Self {
+        Self {
+            profiles: Vec::new(),
+        }
+    }
+
+    pub fn save_or_update(&mut self, profile: Profile) {
+        if let Some(pos) = self.profiles.iter().position(|p| p.devices == profile.devices) {
+            self.profiles[pos] = profile;
+        } else {
+            self.profiles.push(profile);
+        }
+    }
+
+    pub fn select_for_online(&self, online: &BTreeSet<DeviceId>) -> Option<&Profile> {
+        select_profile(&self.profiles, online)
+    }
+}
+
 /// Exact set wins. Otherwise the profile with the largest intersection,
 /// then the smallest extra membership (R-LAYOUT-8).
 pub fn select_profile<'a>(
@@ -65,5 +90,15 @@ mod tests {
         // by extra count (both extra=1) then device order. Either is acceptable
         // as long as we pick one of the two-device profiles.
         assert_eq!(got.devices.len(), 2);
+    }
+
+    #[test]
+    fn store_save_update_and_select() {
+        let mut store = ProfileStore::new();
+        store.save_or_update(prof(&["win1", "win2"]));
+        store.save_or_update(prof(&["win1", "win2", "mac"]));
+        let online: BTreeSet<DeviceId> = ["win1", "win2"].iter().map(|n| id(n)).collect();
+        let selected = store.select_for_online(&online).unwrap();
+        assert_eq!(selected.devices.len(), 2);
     }
 }
