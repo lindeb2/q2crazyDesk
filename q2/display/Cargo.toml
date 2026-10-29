@@ -1,11 +1,11 @@
 [package]
 name = "q2-display"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0"
+rust-version = "1.75"
 description = "Virtual display provider interface (R-PLACE-3)"
 
 [dependencies]
 q2-layout = { path = "../layout" }
-serde.workspace = true
+serde = { version = "1", features = ["derive"] }
