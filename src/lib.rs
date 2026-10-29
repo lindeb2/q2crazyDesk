@@ -73,24 +73,33 @@ pub mod privacy_mode;
 pub mod virtual_display_manager;
 
 mod kcp_stream;
+/// cbindgen:ignore
 mod q2_beside;
 #[cfg(windows)]
+/// cbindgen:ignore
 mod q2_cursor;
 #[cfg(all(
     windows,
     feature = "flutter",
     not(any(target_os = "android", target_os = "ios"))
 ))]
+/// cbindgen:ignore
 mod q2_fullscreen;
 #[cfg(all(
     any(windows, target_os = "macos"),
     feature = "flutter",
     not(any(target_os = "android", target_os = "ios"))
 ))]
+/// cbindgen:ignore
 mod q2_hook;
+/// cbindgen:ignore
 mod q2_init;
+/// cbindgen:ignore
 mod q2_local;
+/// cbindgen:ignore
 mod q2_peers;
+/// cbindgen:ignore
 mod q2_service;
 #[cfg(all(feature = "flutter", not(any(target_os = "android", target_os = "ios"))))]
+/// cbindgen:ignore
 mod q2_session;

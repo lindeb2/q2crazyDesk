@@ -228,17 +228,18 @@ mod macos {
 
     unsafe extern "C" fn raw_callback(
         _proxy: *const c_void,
-        event_type: CGEventType,
+        event_type_raw: u32,
         cg_event: *mut c_void,
         _user_info: *mut c_void,
     ) -> *mut c_void {
         if cg_event.is_null() {
             return cg_event;
         }
-        if (event_type as u32) == 0x0E {
+        if event_type_raw == 0x0E {
             return cg_event;
         }
         let event = std::mem::ManuallyDrop::new(CGEvent::from_ptr(cg_event as _));
+        let event_type = event.get_type();
         if let Some(input) = convert(event_type, &event) {
             if dispatch(input) {
                 event.set_type(CGEventType::Null);
@@ -318,6 +319,7 @@ mod macos {
         }
     }
 
+    /// cbindgen:ignore
     #[link(name = "CoreGraphics", kind = "framework")]
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
@@ -327,7 +329,7 @@ mod macos {
             place: u32,
             options: u32,
             events_of_interest: u64,
-            callback: unsafe extern "C" fn(*const c_void, CGEventType, *mut c_void, *mut c_void) -> *mut c_void,
+            callback: unsafe extern "C" fn(*const c_void, u32, *mut c_void, *mut c_void) -> *mut c_void,
             user_info: *mut c_void,
         ) -> *const c_void;
         fn CFMachPortCreateRunLoopSource(
