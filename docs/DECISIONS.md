@@ -264,6 +264,27 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Known limits:**
   - Non-Tailscale peer IDs fall back to the upstream query path, which reports offline when no custom rendezvous server is configured.
 
+### D-029 Simplified Home Workspace Hub, dynamic monitor geometry, and multi-device real-time layout broadcast (R-UI-2, R-LAYOUT-1, R-LAYOUT-8, R-NET-4) (2026-10-30)
+
+- **Problem:**
+  - Upstream RustDesk displays a cluttered home screen dominated by ID, one-time password, and remote ID connect input, which are redundant in a Tailscale mesh where devices are pre-authenticated and automatically discovered.
+  - The Beside Canvas editor was buried in Settings and only displayed hardcoded dummy monitors (`local:0` and `peer:0`).
+  - Layout changes saved on one device were purely local and never broadcasted to peers over TCP port 21130.
+  - Users lacked an intuitive way to toggle which machines participate in a session, view their status (Sleeping/WoL, Available, Active in session), or switch between Beside (KVM) and Inside (Remote Desktop).
+- **Decision:**
+  - Replaced the legacy home page with `Q2WorkspacePage`:
+    - Top control bar displaying all discovered Tailscale machines with clear status color-coding:
+      - Grayscale: Sleeping/offline with a one-click "Wake (WoL)" trigger.
+      - Blue: Online and available (inactive in session).
+      - Green: Online and active in the multi-screen session.
+    - Checkbox/switch to dynamically include/exclude computers in the session.
+    - Full-screen `Q2CanvasEditor` displaying real local monitor geometry (`q2_local::read_panels`) and remote monitor geometry (`q2_sync::service::fetch_monitors`).
+  - Added Beside vs Inside drag-and-drop overlap detection: dropping a peer monitor inside a host display switches to Inside mode with a one-click segmented selector for `[ Window | Fullscreen ]`. Dragging outside snaps back to Beside edge traversal.
+  - Implemented `q2_service::broadcast_layout(&doc)` which pushes layout changes to all online discovered peers on TCP port 21130.
+  - Extended `src/flutter_ffi.rs` with `main_on_layout_updated()`, emitting `q2_layout_updated` so all connected machines refresh their canvas editor in real time.
+- **Alternatives rejected:** Keeping legacy ID/Password inputs on the start page; requiring manual pairing menus or terminal commands to sync displays.
+- **Known limits:** Wake-on-LAN requires a configured or discovered MAC address; remote machines with multiple network adapters must have port 21130 open across their Tailscale interface.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

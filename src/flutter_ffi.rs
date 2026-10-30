@@ -997,6 +997,32 @@ pub fn main_get_option(key: String) -> String {
 }
 
 pub fn main_get_option_sync(key: String) -> SyncReturn<String> {
+    if key == "q2-local-panels" {
+        #[cfg(windows)]
+        let panels = crate::q2_local::read_panels();
+        #[cfg(target_os = "macos")]
+        let panels = crate::q2_service::panels();
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let panels: Vec<q2_layout::OsPanel> = Vec::new();
+        let json = serde_json::to_string(&panels).unwrap_or_else(|_| "[]".to_owned());
+        return SyncReturn(json);
+    }
+    if let Some(peer_ip) = key.strip_prefix("q2-peer-monitors:") {
+        if let Ok(ip) = peer_ip.trim().parse::<std::net::IpAddr>() {
+            let addr = std::net::SocketAddr::new(ip, q2_sync::service::PORT);
+            let panels = q2_sync::service::fetch_monitors(addr, std::time::Duration::from_millis(1500)).unwrap_or_default();
+            let json = serde_json::to_string(&panels).unwrap_or_else(|_| "[]".to_owned());
+            return SyncReturn(json);
+        }
+        return SyncReturn("[]".to_owned());
+    }
+    if let Some(mac_str) = key.strip_prefix("q2-wake-peer:") {
+        if let Some(mac) = q2_wake::MacAddr::parse(mac_str.trim()) {
+            let ok = q2_wake::send_magic_packet(mac).is_ok();
+            return SyncReturn(if ok { "OK".to_owned() } else { "ERR".to_owned() });
+        }
+        return SyncReturn("ERR".to_owned());
+    }
     SyncReturn(get_option(key))
 }
 
@@ -1005,6 +1031,13 @@ pub fn main_get_error() -> String {
 }
 
 pub fn main_set_option(key: String, value: String) {
+    if key == "q2-layout-doc" {
+        set_option(key, value.clone());
+        if let Ok(doc) = serde_json::from_str::<q2_sync::Versioned<q2_layout::Canvas>>(&value) {
+            crate::q2_service::broadcast_layout(&doc);
+        }
+        return;
+    }
     #[cfg(target_os = "android")]
     {
         let is_permission_option = key.eq(keys::OPTION_ENABLE_CLIPBOARD)
@@ -1586,6 +1619,16 @@ pub fn main_load_fav_peers() {
     } else {
         push_to_flutter("".to_owned());
     }
+}
+
+pub fn main_on_layout_updated() {
+    let data = HashMap::from([
+        ("name", "q2_layout_updated".to_owned()),
+    ]);
+    let _ = flutter::push_global_event(
+        flutter::APP_TYPE_MAIN,
+        serde_json::to_string(&data).unwrap_or_default(),
+    );
 }
 
 pub fn main_load_lan_peers() {

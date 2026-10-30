@@ -11,7 +11,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Once};
 use std::time::Duration;
 
-use hbb_common::{config::Config, log};
+use hbb_common::{config::{Config, LanPeers}, log};
 use q2_layout::{Canvas, OsPanel};
 use q2_sync::{
     service::{self, Allow, LayoutProvider, OnClaim, OnLayout, OnWake, Provider},
@@ -45,11 +45,37 @@ pub fn update_incoming_layout(incoming: Versioned<Canvas>) -> (bool, Option<Vers
         let accepted = cur.merge_incoming(incoming);
         if accepted {
             save_layout(cur);
+            notify_layout_updated();
         }
         (accepted, Some(cur.clone()))
     } else {
         save_layout(&incoming);
+        notify_layout_updated();
         (true, Some(incoming))
+    }
+}
+
+fn notify_layout_updated() {
+    #[cfg(feature = "flutter")]
+    crate::flutter_ffi::main_on_layout_updated();
+}
+
+/// Broadcast the layout document to all online discovered peers.
+pub fn broadcast_layout(doc: &Versioned<Canvas>) {
+    save_layout(doc);
+    let peers = LanPeers::load().peers;
+    for peer in peers {
+        if peer.online {
+            if let Ok(ip) = peer.id.parse::<IpAddr>() {
+                let addr = SocketAddr::new(ip, service::PORT);
+                let doc_clone = doc.clone();
+                let _ = std::thread::Builder::new()
+                    .name("q2-broadcast-layout".to_owned())
+                    .spawn(move || {
+                        let _ = service::push_layout(addr, Duration::from_millis(1500), doc_clone);
+                    });
+            }
+        }
     }
 }
 
