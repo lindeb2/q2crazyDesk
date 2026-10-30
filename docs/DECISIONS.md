@@ -244,6 +244,26 @@ If a q2crazyDesk component needs a newer Rust (for example the Lan Mouse crates)
 - **Alternatives rejected:** Requiring external diagnostic utilities or manual log file searching in file explorer.
 - **Known limits:** Log file export opens the parent log directory via OS shell launcher (`explorer.exe` / `open`); direct file attachment requires user action.
 
+### D-028 Tailscale-backed connection status and peer online reporting (R-NET-2, R-NET-4) (2026-10-30)
+
+- **Problem:**
+  - Upstream RustDesk relies on a central rendezvous server to determine connection readiness (`status_num = 1`) and peer online states.
+  - Because q2crazyDesk forbids connecting to public rendezvous servers (R-NET-2, D-011), the rendezvous online state check returned 0 or -1, causing Windows clients to display "Not ready. Please check your connection." despite Tailscale being fully connected and operational.
+  - Upstream `main_is_using_public_server()` defaulted to `true`, displaying the confusing prompt "Set up your own server for faster connection" on ready clients (e.g. on macOS).
+  - Background peer online queries (`bind.queryOnlines`) attempted TCP connections to the dead rendezvous server and failed, causing online peers to be reported as offline (rendering with an orange warning dot instead of green in both recent and discovered lists).
+- **Decision:**
+  - Tailscale is the authoritative source for network connectivity and peer presence in q2crazyDesk.
+  - Implemented `q2_peers::is_tailscale_running()` and `q2_peers::query_onlines(ids)`.
+  - In `src/flutter_ffi.rs:main_get_connect_status()`, `status_num` is set to `1` ("Ready" with a green status light) when Tailscale is running and healthy.
+  - In `src/ipc.rs`, `Data::OnlineStatus` reports `x = 1` when Tailscale is running.
+  - In `src/common.rs`, `using_public_server()` returns `false`, eliminating the public server guide tip across all platforms.
+  - In `src/client.rs:peer_online::query_online_states()`, Tailscale peer IDs are partitioned using `q2_peers::query_onlines`, invoking the online callback directly so reachable Tailscale peers display a green online dot.
+- **Alternatives rejected:**
+  - Emulating a local dummy rendezvous server process.
+  - Modifying the shared `libs/hbb_common` submodule.
+- **Known limits:**
+  - Non-Tailscale peer IDs fall back to the upstream query path, which reports offline when no custom rendezvous server is configured.
+
 ## Assumptions from section 7
 
 | # | Assumption | Status | Evidence |

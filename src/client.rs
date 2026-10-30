@@ -5305,20 +5305,31 @@ pub mod peer_online {
     };
 
     pub async fn query_online_states<F: FnOnce(Vec<String>, Vec<String>)>(ids: Vec<String>, f: F) {
+        let (mut onlines, mut offlines, remaining) = crate::q2_peers::query_onlines(&ids);
+        if remaining.is_empty() {
+            f(onlines, offlines);
+            return;
+        }
         let test = false;
         if test {
             sleep(1.5).await;
-            let mut onlines = ids;
-            let offlines = onlines.drain((onlines.len() / 2)..).collect();
+            let mut rem_onlines = remaining;
+            let rem_offlines: Vec<String> = rem_onlines.drain((rem_onlines.len() / 2)..).collect();
+            onlines.extend(rem_onlines);
+            offlines.extend(rem_offlines);
             f(onlines, offlines)
         } else {
             let query_timeout = std::time::Duration::from_millis(3_000);
-            match query_online_states_(&ids, query_timeout).await {
-                Ok((onlines, offlines)) => {
+            match query_online_states_(&remaining, query_timeout).await {
+                Ok((rem_onlines, rem_offlines)) => {
+                    onlines.extend(rem_onlines);
+                    offlines.extend(rem_offlines);
                     f(onlines, offlines);
                 }
                 Err(e) => {
                     log::debug!("query onlines, {}", &e);
+                    offlines.extend(remaining);
+                    f(onlines, offlines);
                 }
             }
         }

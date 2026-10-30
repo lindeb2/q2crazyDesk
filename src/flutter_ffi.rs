@@ -1157,11 +1157,19 @@ pub fn main_get_lan_peers() -> String {
 pub fn main_get_connect_status() -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        serde_json::to_string(&get_connect_status()).unwrap_or("".to_string())
+        let mut status = get_connect_status();
+        if crate::q2_peers::is_tailscale_running() {
+            status.status_num = 1;
+        }
+        serde_json::to_string(&status).unwrap_or("".to_string())
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
-        let mut state = hbb_common::config::get_online_state();
+        let mut state = if crate::q2_peers::is_tailscale_running() {
+            1
+        } else {
+            hbb_common::config::get_online_state()
+        };
         if state > 0 {
             state = 1;
         }
