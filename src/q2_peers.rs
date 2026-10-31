@@ -61,6 +61,17 @@ pub fn query_onlines(ids: &[String]) -> (Vec<String>, Vec<String>, Vec<String>) 
 }
 
 pub fn whitelist_for(paired_csv: &str) -> String {
+    if paired_csv.trim().is_empty() {
+        let peers = LanPeers::load().peers;
+        let ips: Vec<String> = peers
+            .into_iter()
+            .filter(|p| is_tailscale_peer_id(&p.id))
+            .map(|p| p.id)
+            .collect();
+        if !ips.is_empty() {
+            return ips.join(",");
+        }
+    }
     q2_net::paired_whitelist(paired_csv)
 }
 
@@ -73,7 +84,14 @@ pub fn is_paired_peer(ip: &str) -> bool {
     let Ok(addr) = ip.parse::<Ipv4Addr>() else {
         return false;
     };
-    q2_net::is_paired_ip(&Config::get_option(PAIRED_KEY), addr)
+    if !q2_net::is_tailscale_ip(addr) {
+        return false;
+    }
+    let paired = Config::get_option(PAIRED_KEY);
+    if paired.trim().is_empty() {
+        return true;
+    }
+    q2_net::is_paired_ip(&paired, addr)
 }
 
 pub fn refresh() {

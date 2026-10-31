@@ -1033,7 +1033,24 @@ pub fn main_get_error() -> String {
 pub fn main_set_option(key: String, value: String) {
     if key == "q2-layout-doc" {
         set_option(key, value.clone());
-        if let Ok(doc) = serde_json::from_str::<q2_sync::Versioned<q2_layout::Canvas>>(&value) {
+        let doc_opt = serde_json::from_str::<q2_sync::Versioned<q2_layout::Canvas>>(&value)
+            .ok()
+            .or_else(|| {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&value) {
+                    let version = v.get("version").and_then(|x| x.as_u64()).unwrap_or(1);
+                    let writer = v.get("writer").and_then(|x| x.as_str()).unwrap_or("local").to_owned();
+                    let canvas_val = v.get("value").or_else(|| v.get("data"))?;
+                    let canvas: q2_layout::Canvas = serde_json::from_value(canvas_val.clone()).ok()?;
+                    Some(q2_sync::Versioned {
+                        version,
+                        writer: q2_layout::DeviceId(writer),
+                        value: canvas,
+                    })
+                } else {
+                    None
+                }
+            });
+        if let Some(doc) = doc_opt {
             crate::q2_service::broadcast_layout(&doc);
         }
         return;

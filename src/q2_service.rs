@@ -18,7 +18,6 @@ use q2_sync::{
     Versioned,
 };
 
-use crate::q2_peers::PAIRED_KEY;
 
 pub const LAYOUT_KEY: &str = "q2-layout-doc";
 
@@ -91,10 +90,10 @@ pub fn sync_layout_with_peer(addr: SocketAddr, timeout: Duration) {
     }
 }
 
-/// Only paired Tailscale addresses are answered.
+/// Tailscale addresses in 100.64.0.0/10 are answered.
 pub fn paired_allow() -> Allow {
     Arc::new(|ip| match ip {
-        IpAddr::V4(v4) => q2_net::is_paired_ip(&Config::get_option(PAIRED_KEY), v4),
+        IpAddr::V4(v4) => q2_net::is_tailscale_ip(v4),
         IpAddr::V6(_) => false,
     })
 }

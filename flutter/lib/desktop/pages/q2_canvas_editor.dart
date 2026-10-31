@@ -48,12 +48,14 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
   int _version = 0;
   String _activeProfile = 'Default';
   double _scale = 0.22; // widget px per real mm
+  final Map<String, List<double>> _savedOrigins = {};
 
   Set<String> get activeDevices => Set.unmodifiable(_activeDevices);
 
   @override
   void initState() {
     super.initState();
+    gFFI.lanPeersModel.addListener(_onPeersChanged);
     _loadLayout();
 
     // Listen to real-time layout updates from peers over TCP port 21130
@@ -66,8 +68,16 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
 
   @override
   void dispose() {
+    gFFI.lanPeersModel.removeListener(_onPeersChanged);
     platformFFI.unregisterEventHandler('q2_layout_updated', 'q2_canvas_editor');
     super.dispose();
+  }
+
+  void _onPeersChanged() {
+    _syncPeersToMonitors();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void setDeviceSessionActive(String device, bool active) {
@@ -77,6 +87,31 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
         if (_placements[device] == 'Inactive' || _placements[device] == null) {
           _placements[device] = 'Beside';
         }
+
+        // Ensure monitor exists in _monitors
+        if (!_monitors.any((m) => m.device == device)) {
+          double nextRightMm = _monitors.fold<double>(0.0, (prev, m) => max(prev, m.xMm + m.widthMm)) + 15.0;
+          Peer? peer;
+          for (final p in gFFI.lanPeersModel.peers) {
+            if (p.id == device) {
+              peer = p;
+              break;
+            }
+          }
+          final peerName = peer != null && peer.hostname.isNotEmpty ? peer.hostname : device;
+
+          _monitors.add(_EditorMonitor(
+            device: device,
+            index: 0,
+            name: peerName,
+            xMm: nextRightMm,
+            yMm: 0.0,
+            widthMm: 520.0,
+            heightMm: 293.0,
+            widthPx: 1920,
+            heightPx: 1080,
+          ));
+        }
       } else {
         _activeDevices.remove(device);
         _placements[device] = 'Inactive';
@@ -85,22 +120,64 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
     _saveAndSync();
   }
 
+  void _syncPeersToMonitors() {
+    final lanPeers = gFFI.lanPeersModel.peers;
+    double nextRightMm = _monitors.fold<double>(0.0, (prev, m) => max(prev, m.xMm + m.widthMm)) + 15.0;
+    bool changed = false;
+
+    for (final peer in lanPeers) {
+      final dev = peer.id;
+      if (!_monitors.any((m) => m.device == dev)) {
+        final peerName = peer.hostname.isNotEmpty ? peer.hostname : (peer.alias.isNotEmpty ? peer.alias : dev);
+        final saved = _savedOrigins['$dev:0'];
+        final originX = saved != null ? saved[0] : nextRightMm;
+        final originY = saved != null ? saved[1] : 0.0;
+        if (saved == null) {
+          nextRightMm += 520.0 + 15.0;
+        }
+
+        _monitors.add(_EditorMonitor(
+          device: dev,
+          index: 0,
+          name: peerName,
+          xMm: originX,
+          yMm: originY,
+          widthMm: 520.0,
+          heightMm: 293.0,
+          widthPx: 1920,
+          heightPx: 1080,
+        ));
+
+        if (_placements[dev] == null || _placements[dev] == 'Beside') {
+          _placements[dev] = 'Beside';
+          _activeDevices.add(dev);
+        }
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      _updateProfileIndicator();
+    }
+  }
+
   void _loadLayout() {
-    final Map<String, List<double>> savedOrigins = {};
+    _savedOrigins.clear();
 
     final raw = bind.mainGetOptionSync(key: 'q2-layout-doc');
     if (raw.isNotEmpty) {
       try {
         final parsed = jsonDecode(raw) as Map<String, dynamic>;
         _version = parsed['version'] as int? ?? 0;
-        final data = parsed['data'] as Map<String, dynamic>? ?? {};
+        // Accept both 'value' (Rust Versioned<Canvas>) and legacy 'data'
+        final data = (parsed['value'] ?? parsed['data']) as Map<String, dynamic>? ?? {};
         final mons = data['monitors'] as List<dynamic>? ?? [];
         for (final m in mons) {
           final id = m['id'] as Map<String, dynamic>? ?? {};
           final dev = id['device'] as String? ?? 'unknown';
           final idx = id['local_index'] as int? ?? 0;
           final origin = m['origin_mm'] as List<dynamic>? ?? [0.0, 0.0];
-          savedOrigins['$dev:$idx'] = [
+          _savedOrigins['$dev:$idx'] = [
             (origin[0] as num).toDouble(),
             (origin[1] as num).toDouble(),
           ];
@@ -143,7 +220,7 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
         if (wMm <= 0.0) wMm = wPx * 25.4 / 96.0;
         if (hMm <= 0.0) hMm = hPx * 25.4 / 96.0;
 
-        final saved = savedOrigins['local:$idx'];
+        final saved = _savedOrigins['local:$idx'];
         final originX = saved != null ? saved[0] : (idx * (wMm + 8.0));
         final originY = saved != null ? saved[1] : 0.0;
 
@@ -161,7 +238,7 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
       }
     } else {
       // Fallback local monitor
-      final saved = savedOrigins['local:0'];
+      final saved = _savedOrigins['local:0'];
       _monitors.add(_EditorMonitor(
         device: 'local',
         index: 0,
@@ -177,80 +254,71 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
 
     // 2. Populate discovered peer monitors
     final lanPeers = gFFI.lanPeersModel.peers;
-    double nextRightMm = _monitors.fold<double>(0.0, (prev, m) => max(prev, m.xMm + m.widthMm)) + 12.0;
+    double nextRightMm = _monitors.fold<double>(0.0, (prev, m) => max(prev, m.xMm + m.widthMm)) + 15.0;
 
     for (final peer in lanPeers) {
       final dev = peer.id;
       final currentPl = _placements[dev];
-      if (currentPl != 'Inactive' && (currentPl != null || peer.online)) {
+      if (currentPl != 'Inactive') {
         _activeDevices.add(dev);
         if (_placements[dev] == null) {
           _placements[dev] = 'Beside';
         }
       }
 
-      // Query real panels for peer
-      final peerRaw = bind.mainGetOptionSync(key: 'q2-peer-monitors:$dev');
-      List<dynamic> peerPanels = [];
-      if (peerRaw.isNotEmpty) {
-        try {
-          peerPanels = jsonDecode(peerRaw) as List<dynamic>? ?? [];
-        } catch (_) {}
-      }
-
       final peerName = peer.hostname.isNotEmpty ? peer.hostname : (peer.alias.isNotEmpty ? peer.alias : dev);
-
-      if (peerPanels.isNotEmpty) {
-        for (final p in peerPanels) {
-          final idx = (p['index'] as num?)?.toInt() ?? 0;
-          final wPx = (p['width'] as num?)?.toInt() ?? 1920;
-          final hPx = (p['height'] as num?)?.toInt() ?? 1080;
-          double wMm = (p['width_mm'] as num?)?.toDouble() ?? 0.0;
-          double hMm = (p['height_mm'] as num?)?.toDouble() ?? 0.0;
-          if (wMm <= 0.0) wMm = wPx * 25.4 / 96.0;
-          if (hMm <= 0.0) hMm = hPx * 25.4 / 96.0;
-
-          final saved = savedOrigins['$dev:$idx'];
-          final originX = saved != null ? saved[0] : nextRightMm;
-          final originY = saved != null ? saved[1] : 0.0;
-          if (saved == null) {
-            nextRightMm += wMm + 12.0;
-          }
-
-          _monitors.add(_EditorMonitor(
-            device: dev,
-            index: idx,
-            name: '$peerName ${idx + 1}',
-            xMm: originX,
-            yMm: originY,
-            widthMm: wMm,
-            heightMm: hMm,
-            widthPx: wPx,
-            heightPx: hPx,
-          ));
-        }
-      } else {
-        // Fallback peer display
-        final saved = savedOrigins['$dev:0'];
-        final originX = saved != null ? saved[0] : nextRightMm;
-        final originY = saved != null ? saved[1] : 0.0;
-        if (saved == null) {
-          nextRightMm += 520.0 + 12.0;
-        }
-
-        _monitors.add(_EditorMonitor(
-          device: dev,
-          index: 0,
-          name: peerName,
-          xMm: originX,
-          yMm: originY,
-          widthMm: 520.0,
-          heightMm: 293.0,
-          widthPx: 1920,
-          heightPx: 1080,
-        ));
+      final saved = _savedOrigins['$dev:0'];
+      final originX = saved != null ? saved[0] : nextRightMm;
+      final originY = saved != null ? saved[1] : 0.0;
+      if (saved == null) {
+        nextRightMm += 520.0 + 15.0;
       }
+
+      _monitors.add(_EditorMonitor(
+        device: dev,
+        index: 0,
+        name: peerName,
+        xMm: originX,
+        yMm: originY,
+        widthMm: 520.0,
+        heightMm: 293.0,
+        widthPx: 1920,
+        heightPx: 1080,
+      ));
     }
+
+    // 3. Asynchronously query real peer panel sizes without blocking UI
+    Future.microtask(() async {
+      for (final peer in lanPeers) {
+        if (!peer.online) continue;
+        final dev = peer.id;
+        final peerRaw = await bind.mainGetOption(key: 'q2-peer-monitors:$dev');
+        if (peerRaw.isNotEmpty) {
+          try {
+            final list = jsonDecode(peerRaw) as List<dynamic>? ?? [];
+            if (list.isNotEmpty && mounted) {
+              final p0 = list[0];
+              final wPx = (p0['width'] as num?)?.toInt() ?? 1920;
+              final hPx = (p0['height'] as num?)?.toInt() ?? 1080;
+              double wMm = (p0['width_mm'] as num?)?.toDouble() ?? 0.0;
+              double hMm = (p0['height_mm'] as num?)?.toDouble() ?? 0.0;
+              if (wMm <= 0.0) wMm = wPx * 25.4 / 96.0;
+              if (hMm <= 0.0) hMm = hPx * 25.4 / 96.0;
+
+              for (final m in _monitors) {
+                if (m.device == dev && m.index == 0) {
+                  m.widthMm = wMm;
+                  m.heightMm = hMm;
+                  m.widthPx = wPx;
+                  m.heightPx = hPx;
+                }
+              }
+              setState(() {});
+            }
+          } catch (_) {}
+        }
+      }
+    });
 
     _updateProfileIndicator();
     setState(() {});
@@ -326,24 +394,27 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
 
   Future<void> _saveAndSync() async {
     _version += 1;
+    final canvasData = {
+      'monitors': _monitors
+          .map((m) => {
+                'id': {'device': m.device, 'local_index': m.index},
+                'origin_mm': [m.xMm, m.yMm],
+                'physical_mm': {'width': m.widthMm, 'height': m.heightMm},
+                'pixels': {'width': m.widthPx, 'height': m.heightPx},
+                'scale': 1.0,
+                'override_physical_mm': null,
+              })
+          .toList(),
+      'placements': _placements,
+      'links': [],
+      'version': _version,
+    };
+
     final layoutMap = {
       'writer': 'local',
       'version': _version,
-      'data': {
-        'monitors': _monitors
-            .map((m) => {
-                  'id': {'device': m.device, 'local_index': m.index},
-                  'origin_mm': [m.xMm, m.yMm],
-                  'physical_mm': {'width': m.widthMm, 'height': m.heightMm},
-                  'pixels': {'width': m.widthPx, 'height': m.heightPx},
-                  'scale': 1.0,
-                  'override_physical_mm': null,
-                })
-            .toList(),
-        'placements': _placements,
-        'links': [],
-        'version': _version,
-      }
+      'value': canvasData, // Rust Versioned<Canvas> has `pub value: T`
+      'data': canvasData,  // for backward compatibility
     };
 
     final rawJson = jsonEncode(layoutMap);
@@ -442,16 +513,15 @@ class Q2CanvasEditorState extends State<Q2CanvasEditor> {
     // Look up peer if not local
     Peer? peer;
     if (!isLocal) {
-      final peers = gFFI.lanPeersModel.peers;
-      peer = peers.firstWhere((p) => p.id == m.device, orElse: () => Peer.fromJson({'id': m.device}));
+      for (final p in gFFI.lanPeersModel.peers) {
+        if (p.id == m.device) {
+          peer = p;
+          break;
+        }
+      }
     }
     final isOnline = isLocal || (peer?.online ?? false);
 
-    // Color coding based on user specification:
-    // 1. Grayscale: Sleeping / Offline
-    // 2. Blue / Neutral: Available (online, but not active in session)
-    // 3. Green / Accent: Active in session (Beside)
-    // 4. Purple / Indigo: Active in session (Inside / Remote Desktop)
     Color borderColor;
     Color fillColor;
     String modeBadge;
